@@ -1,5 +1,14 @@
 """Streamlit Community Cloud entrypoint for Photo & Signature Studio."""
 
+import sys
+from pathlib import Path
+
+# Streamlit runs this file as web/app.py. Add the repository root so the
+# shared web_app.py and core package can be imported reliably.
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from web_app import main
 
 
