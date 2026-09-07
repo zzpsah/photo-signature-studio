@@ -2,40 +2,38 @@
 
 A **local/offline Windows desktop utility** for converting photos, signatures, scanned documents, screenshots, and PDF pages into portal-ready image files with exact pixel dimensions, white backgrounds, and configurable file-size limits.
 
-> **Privacy:** Processing is designed to happen locally on the computer. The application does not upload identity documents, photographs, or signatures to a cloud service.
+> **Privacy:** Normal image processing is local. The application is designed so identity documents, photos, signatures, and extracted data remain on the user's computer unless the user explicitly uses a future external/web workflow.
 
-## 1. What the application does
+## 1. Product direction
 
-The current MVP handles photo/signature preparation. The architecture is being extended toward a record-based document processing system:
+The project is evolving from a photo/signature utility into a **record-based document preparation system**:
 
 ```text
-PDF / Image / Clipboard / Screenshot
-                  |
-                  v
-             Input Inbox
-                  |
-          +-------+--------+
-          |                |
-          v                v
-       Document          Photo / Signature
-          |                |
-          v                v
-    Future OCR          Image Processing
-    + Chandra OCR            |
-          |                  |
-          +--------+---------+
-                   v
-              Record / ID
-                   |
-        +----------+----------+
-        |          |          |
-      Data       Assets     Files
-        |          |          |
-        +----------+----------+
-                   |
-             Future Web
-              Automation
+Screenshot / Clipboard / PDF / Image
+                |
+                v
+           Input Inbox
+                |
+                v
+            Record ID
+                |
+       +--------+--------+
+       |        |        |
+     Source    OCR     Assets
+     Files     Data      |
+       |        |    +---+---+
+       |        |   Photo  Signature
+       |        |      |      |
+       +--------+------+------+
+                |
+         Portal-ready files
+                |
+       Future web automation
 ```
+
+Every application/person/document set gets a stable **Record ID**. The Record ID, not a filename, is the relationship key connecting the original document, OCR data, extracted photo, extracted signature, processed assets, and future portal data.
+
+## 2. Current capabilities
 
 ### Supported input
 
@@ -49,126 +47,130 @@ PDF / Image / Clipboard / Screenshot
 - BMP
 - TIFF
 - PDF
-- Drag-and-drop is planned for a future release
 
 ### Photo processing
 
-- Face detection using OpenCV Haar cascade
-- Conservative portrait crop around the detected face
+- OpenCV Haar-cascade face detection
+- Conservative portrait crop
 - White background canvas
-- Exact output width and height in pixels
-- Optional brightness/contrast/sharpness enhancement
-- JPEG compression to meet a maximum KB target
-- PNG output option
+- Exact output width/height
+- Optional light enhancement
+- JPEG KB-target optimization
+- PNG output
 
 ### Signature processing
 
-- Detects dark ink on scanned paper
-- Reduces light paper/background areas
-- Crops unnecessary whitespace
-- Places the result on a white background
-- Exact output width and height
+- Dark-ink detection
+- Background normalization
+- Whitespace cropping
+- White background
+- Exact output dimensions
 - JPEG/PNG output
 
 ### PDF processing
 
-- Opens PDF files locally
-- Renders PDF pages for processing
-- Supports selecting a page from a multi-page PDF
+- Local PDF opening
+- Local page rendering
+- Multi-page selection
 
-## 2. Clipboard screenshot workflow
+## 3. Clipboard screenshot workflow
 
-A screenshot copied to the Windows clipboard is treated as an image input. The current application can receive it through **Ctrl+V** without requiring the screenshot to be saved first.
+A screenshot copied to the Windows clipboard can be pasted directly with **Ctrl+V**. It does not need to be saved first.
 
 ```text
-Snipping Tool / Print Screen / browser / PDF viewer
+Snipping Tool / Print Screen / Browser / PDF Viewer
                          |
-                    Copy screenshot
+                     Copy image
                          |
                        Ctrl+V
                          |
-                  Photo & Signature Studio
+                Photo & Signature Studio
                          |
-              Process / OCR / Extract later
+              Record / Process / OCR later
 ```
 
-This is deliberately part of the input model because some workflows provide information only through a visible screen rather than a directly downloadable file.
+This input route is important for information that is visible on screen but not conveniently downloadable.
 
-## 3. Record-based data and file management
+## 4. Record-based file management
 
-Future document/OCR features will use a stable **Record ID** instead of relying on filenames to determine relationships.
+The managed local workspace uses one directory per Record ID. Portal-ready photo and signature files are kept in dedicated directories so they can be selected directly for upload.
 
 Example:
 
 ```text
-APP-2026-000125/
-├── source/
-│   ├── application.pdf
-│   └── screenshot.png
-├── ocr/
-│   ├── raw_text.txt
-│   └── extracted.json
-├── identity/
-│   ├── photo.jpg
-│   └── signature.jpg
-├── processed/
-│   ├── photo_200x230.jpg
-│   └── signature_140x60.jpg
-└── documents/
+data/
+├── studio.db
+└── records/
+    └── APP-20260907-A1B2C3D4/
+        ├── source/
+        │   ├── application.pdf
+        │   └── screenshot.png
+        ├── ocr/
+        │   ├── raw_text.txt
+        │   └── extracted.json
+        ├── photo/
+        │   └── photo_200x230.jpg
+        ├── signature/
+        │   └── signature_140x60.jpg
+        ├── documents/
+        │   └── supporting_document.pdf
+        ├── exports/
+        └── portal_manifest.json
 ```
 
-The record database will maintain relationships such as:
+### Why this layout matters
 
-```text
-Record
-  |
-  +-- Source document
-  |      +-- Page
-  |      +-- OCR result
-  |      +-- Photo region -> photo asset
-  |      +-- Signature region -> signature asset
-  |
-  +-- Extracted person/data fields
-  |
-  +-- Processed photo
-  +-- Processed signature
-  +-- Generated documents
-```
+The user can open the record folder and immediately find:
 
-This prevents accidental mixing when files have generic names such as `scan.pdf`, `photo.jpg`, or `signature.jpg`.
+- **Photo** → ready to upload to a portal
+- **Signature** → ready to upload to a portal
+- **OCR data** → structured data available for form filling
+- **Source files** → original evidence
+- **Documents** → supporting files
+- **Manifest** → machine-readable relationship information
 
-## 4. Local data architecture
+The system does not depend on filenames such as `photo.jpg` or `signature.jpg` to decide which person they belong to. The Record ID provides that relationship.
 
-A local SQLite database is being introduced as the metadata/relationship layer. Binary documents and images remain in local record folders.
+## 5. Local database and storage layer
+
+SQLite stores metadata and relationships; binary files stay in the record folders.
 
 Current foundation modules:
 
 ```text
 core/
-├── __init__.py
-├── database.py       SQLite schema and record metadata
-└── records.py        Record-linked local folder layout
+├── database.py
+│   └── Records, documents, OCR results and assets
+├── records.py
+│   └── Standard Record ID folder layout
+├── storage.py
+│   └── Managed source/photo/signature/document directories
+└── record_service.py
+    └── High-level creation, source-file, portal-asset and OCR storage
 
 oCR/
-├── __init__.py
-└── interface.py      Provider-neutral OCR interface
+└── interface.py
+    └── Provider-neutral OCR interface
 
 automation/
-└── __init__.py       Future browser/web automation boundary
+└── __init__.py
+    └── Boundary for future browser/web automation
 ```
 
-The database schema provides foundations for:
+The service layer can store:
 
-- Records
-- Source documents
-- OCR results
-- Extracted assets
-- Photo/signature relationships
-- Source page and region references
+```text
+Record
+  ├── source document
+  ├── OCR text
+  ├── structured OCR JSON
+  ├── photo asset
+  ├── signature asset
+  ├── supporting documents
+  └── portal-ready outputs
+```
 
-The database foundation is present now; the full record-management UI and automatic linking workflow are planned enhancements.
-
-## 5. OCR and Chandra OCR roadmap
+## 6. OCR and Chandra OCR
 
 The intended OCR architecture is provider-neutral:
 
@@ -185,143 +187,130 @@ The intended OCR architecture is provider-neutral:
                      |
              Structured data
                      |
-                Record ID
+                  Record ID
 ```
 
-**Chandra OCR is the planned primary OCR/document-understanding integration.** It will be placed behind the `OCREngine` interface so the desktop UI and record-management system do not depend directly on one OCR provider.
+**Chandra OCR is the planned primary OCR/document-understanding integration.** It will plug into the OCR interface rather than being embedded throughout the UI.
 
-Potential capabilities include:
+Potential capabilities:
 
 - OCR text extraction
 - Structured field extraction
 - Document/page classification
-- Detection of form fields
-- Detection of photo and signature regions
-- Linking extracted photo/signature assets back to their source document and page
-- OCR-assisted extraction of portal requirements where technically feasible
-- Confidence/verification information so uncertain OCR is not silently treated as fact
+- Form-field detection
+- Photo-region detection
+- Signature-region detection
+- Extraction of photo/signature from scanned documents
+- Linking extracted assets to source document/page/region
+- OCR-assisted extraction of portal requirements
+- Confidence/verification information
 
-> **Chandra OCR is not yet implemented in the current MVP.** The current code contains only the integration boundary/foundation.
+> **Chandra OCR is not yet implemented.** The repository currently contains the provider-neutral OCR boundary and storage architecture needed for the integration.
 
-## 6. Future web automation architecture
+## 7. Future portal/web automation
 
-The application is intentionally being structured so future web automation can consume the same normalized records instead of reading desktop UI controls directly.
-
-```text
-                    Record / Data
-                         |
-                 Automation Adapter
-                         |
-              +----------+----------+
-              |                     |
-        Portal Adapter A      Portal Adapter B
-              |                     |
-              +----------+----------+
-                         |
-                  Browser Automation
-                         |
-              Fill -> Upload -> Review
-                         |
-                  User confirmation
-                         |
-                      Submit
-```
-
-Portal-specific mappings can eventually look like:
+The normalized Record should become the single source of truth for future web automation.
 
 ```text
-Portal field          Record field
------------------------------------
-Candidate Name    <-  person.name
-Father Name       <-  person.father_name
-DOB               <-  person.date_of_birth
-Photo             <-  linked photo asset
-Signature         <-  linked signature asset
+Record
+  |
+  +-- Person data
+  +-- OCR data
+  +-- Photo file
+  +-- Signature file
+  +-- Supporting documents
+           |
+           v
+   Portal Automation Adapter
+           |
+      Browser automation
+           |
+      Fill -> Upload
+           |
+         Review
+           |
+   User confirmation
+           |
+        Submit
 ```
 
-The preferred safety model is **Prepare → Fill → Review → User Confirmation → Submit**, rather than blind automatic submission.
+Example future mapping:
 
-Web automation is **not implemented in the current MVP**. The `automation/` package marks the architectural boundary for future development.
+```text
+Portal field             Record source
+---------------------------------------
+Candidate Name       <-  person.name
+Father Name          <-  person.father_name
+Date of Birth        <-  person.date_of_birth
+Photo upload         <-  photo/photo_*.jpg
+Signature upload     <-  signature/signature_*.jpg
+Supporting document  <-  documents/*
+```
 
-## 7. Important accuracy note
+The preferred workflow is **Prepare → Fill → Review → User Confirmation → Submit**, rather than blind submission.
 
-The application is intended to make image preparation fast, but **portal requirements must always be checked against the destination website/form**.
+Web automation is not implemented yet.
 
-Do not assume that a preset is an official government specification. Pixel dimensions, KB limits, aspect ratios, file formats, and background rules can change.
+## 8. Important accuracy note
 
-Before submitting an important application, visually verify:
+Portal requirements must always be checked against the actual destination website/form. Presets are convenience configurations, not authoritative specifications.
 
-- Face is correctly framed
-- Entire head is visible where required
-- Photo is not stretched
-- Background is actually white
-- Signature is legible
-- Pixel dimensions are correct
-- File size is within the portal limit
-- File format is accepted
-- OCR-extracted data is correct
+Before submission, verify:
 
-## 8. Repository file structure
+- Photo framing
+- Head visibility where required
+- White background where required
+- Signature legibility
+- Exact pixel dimensions
+- File size
+- File format
+- OCR-extracted data
+- Correct Record ID and linked files
+
+## 9. Repository file structure
 
 ```text
 photo-signature-studio/
 │
 ├── app.py
-│   └── Main desktop application.
-│
 ├── core/
 │   ├── __init__.py
 │   ├── database.py
-│   │   └── Local SQLite schema for records, documents, OCR and assets.
-│   └── records.py
-│       └── Record-linked local file/folder management.
-│
+│   ├── records.py
+│   ├── storage.py
+│   └── record_service.py
 ├── ocr/
 │   ├── __init__.py
 │   └── interface.py
-│       └── Provider-neutral OCR interface; Chandra OCR will plug in here.
-│
 ├── automation/
 │   └── __init__.py
-│       └── Boundary for future browser/web portal automation.
-│
 ├── requirements.txt
-│   └── Python packages required to run/build the application.
-│
 ├── build_windows.bat
-│   └── Local Windows build script. Creates the standalone EXE.
-│
 ├── README.md
-│   └── Project documentation, architecture and setup instructions.
-│
 ├── .gitignore
-│
 └── .github/
     └── workflows/
         └── windows-build.yml
-            └── GitHub Actions Windows build and artifact upload.
 ```
 
-## 9. Requirements
+## 10. Requirements
 
-### For running from source
+### Running from source
 
 - Windows 10/11 recommended
 - Python 3.11 or 3.12 recommended
-- Internet is required only to install Python packages initially
-- After dependencies are installed, image processing can run offline
+- Internet is initially required to install Python packages
+- Normal image processing is local/offline after dependencies are installed
 
 ### Python dependencies
 
-- **Pillow** — image loading, manipulation, clipboard support and output
-- **OpenCV** — face/ink detection and image processing
-- **NumPy** — numerical image operations
-- **PyMuPDF** — local PDF rendering
-- **PyInstaller** — standalone Windows executable creation
+- **Pillow** — images and clipboard
+- **OpenCV** — face/ink detection
+- **NumPy** — image operations
+- **PyMuPDF** — PDF rendering
+- **PyInstaller** — Windows EXE packaging
 
-Exact package versions are maintained in `requirements.txt`.
-
-## 10. Run from source on Windows
+## 11. Run from source
 
 ```bat
 python -m venv .venv
@@ -331,7 +320,7 @@ python -m pip install -r requirements.txt
 python app.py
 ```
 
-## 11. Build the standalone Windows EXE
+## 12. Build Windows EXE
 
 Developer build:
 
@@ -345,11 +334,11 @@ Output:
 dist\PhotoSignatureStudio.exe
 ```
 
-> The `.bat` file is a build tool, not the application. End users should run `PhotoSignatureStudio.exe`.
+The `.bat` file is a build tool. End users should run `PhotoSignatureStudio.exe`.
 
-## 12. GitHub Actions Windows build and downloadable EXE
+## 13. GitHub Actions Windows build
 
-The workflow in `.github/workflows/windows-build.yml` installs Python 3.12, installs dependencies, runs PyInstaller, and uploads the executable as an artifact.
+The workflow in `.github/workflows/windows-build.yml` builds the standalone Windows executable and uploads it as an artifact.
 
 Artifact:
 
@@ -358,139 +347,89 @@ PhotoSignatureStudio-Windows
 └── PhotoSignatureStudio.exe
 ```
 
-A push to `main` triggers the build. It can also be started manually from the GitHub Actions tab.
+## 14. Roadmap
 
-The EXE is distributed as a build artifact rather than committed directly to the source repository.
+### Phase 1 — Record management
 
-## 13. Basic usage
+- Record-management UI
+- New/open/search records
+- Automatic Record ID creation
+- Managed source/photo/signature/document folders
+- One-click **Open Record Folder**
+- One-click **Copy Photo Path** and **Copy Signature Path**
+- Record-level export/backup
 
-### Paste a photo or screenshot
+### Phase 2 — Document intelligence
 
-1. Copy an image, screenshot, or supported clipboard content.
-2. Open Photo & Signature Studio.
-3. Press **Ctrl+V**.
-4. Select Photo or Signature mode.
-5. Choose a preset or enter Custom dimensions.
-6. Set the maximum KB value if required.
-7. Process and save.
+- Chandra OCR integration
+- Structured data extraction
+- OCR verification/editing
+- Automatic document/page classification
+- Photo and signature region detection
+- Automatic extraction and linking to the correct Record ID
+- Portal requirement extraction where technically feasible
 
-### Open an image
+### Phase 3 — Processing productivity
 
-1. Open a JPG, PNG, WebP, BMP or TIFF.
-2. Select Photo or Signature mode.
-3. Configure dimensions and KB.
-4. Process and save.
+- Batch processing
+- Drag-and-drop
+- Portal presets
+- Application kits
+- Duplicate detection
+- Hindi/English interface
+- Large-file memory controls
+- Background processing/progress/cancellation
 
-### Process a PDF
+### Phase 4 — Web automation
 
-1. Open the PDF.
-2. Select the required page.
-3. Select Photo or Signature mode.
-4. Process and export.
+- Browser automation framework
+- Portal-specific adapters
+- Field mapping from Record data to portal fields
+- Upload linked photo/signature/document files
+- Pre-submission validation
+- User review and confirmation
+- Automation logs
 
-## 14. Output-size optimization
+## 15. Current project status
 
-When a maximum KB value is specified, the application attempts to reduce JPEG quality until the result is at or below the requested limit.
-
-PNG is not suitable for every KB-constrained photograph because PNG is lossless and may produce a larger file than JPEG.
-
-## 15. Privacy and security
-
-Normal processing is local and does not require an application server.
-
-Future OCR and automation modules should preserve the same privacy-first approach wherever technically practical. Sensitive documents should not be placed in public GitHub issues, commits, screenshots, or test fixtures.
-
-## 16. Troubleshooting
-
-### `.bat` build appears to hang
-
-Run it from **Command Prompt** so installation/build output remains visible. The first build may take time because OpenCV, NumPy, PyMuPDF and PyInstaller are large dependencies. If it remains stuck, capture the last displayed command/output.
-
-### EXE is missing
-
-Check:
-
-```text
-dist\PhotoSignatureStudio.exe
-```
-
-### OpenCV cannot find the face
-
-Detection depends on image quality, lighting, angle and face size. Verify the result manually.
-
-### Signature has unwanted background
-
-Use a clean, high-resolution scan with strong ink/paper contrast and inspect the result before submission.
-
-## 17. Project status and roadmap
-
-**Current:** Functional offline MVP / foundation
+**Functional offline MVP + record/OCR/storage architecture foundation**
 
 ### Implemented now
 
 - Windows desktop GUI
-- Clipboard image and screenshot paste with Ctrl+V
+- Clipboard image/screenshot paste with Ctrl+V
 - Clipboard file-path support where available
-- JPG/JPEG/PNG/WebP/BMP/TIFF input
-- Local PDF page rendering
-- Photo processing with OpenCV face detection
+- Image and PDF input
+- Photo processing
 - Signature cleanup
 - Exact pixel dimensions
-- JPEG KB-target optimization
-- PNG output
-- Preview and export
-- Standalone Windows EXE build
-- GitHub Actions Windows build artifact
-- Initial SQLite/record-management architecture
+- KB-target JPEG optimization
+- Preview/export
+- Standalone Windows build
+- GitHub Actions build artifact
+- SQLite relationship foundation
+- Record-oriented storage layer
+- Dedicated photo/signature directories
+- OCR storage format
 - Provider-neutral OCR interface
 - Future automation boundary
 
-### Next development phases
-
-**Phase 1 — Document intelligence**
-- Chandra OCR integration
-- Structured data extraction
-- Record-management UI
-- Automatic document/page classification
-- Photo/signature region detection
-- Source-to-asset linking
-
-**Phase 2 — Productivity**
-- Search and filtering
-- Batch processing
-- Portal presets
-- Application kits
-- Export/backup packages
-- Hindi/English interface
-- Duplicate detection
-
-**Phase 3 — Advanced image/document processing**
-- AI portrait segmentation/background removal
-- Better passport composition rules
-- Manual crop editor
-- Large-file memory controls
-- Background processing, progress and cancellation
-
-**Phase 4 — Web automation**
-- Browser automation framework
-- Portal-specific adapters
-- Field mapping from records to portal forms
-- Photo/signature/document uploads
-- Pre-submission validation
-- Human review/confirmation
-- Automation logs
-
 ### Not yet implemented
 
-- Chandra OCR engine integration
+- Chandra OCR engine
 - Full record-management UI
-- Automatic data extraction
-- Automatic photo/signature detection from documents
+- Automatic structured data extraction
+- Automatic photo/signature extraction from documents
 - Browser/web automation
-- AI background removal/segmentation
-- Drag-and-drop
+- AI background removal
 - Batch processing
 - Installer package
+
+## 16. Privacy and security
+
+The application is designed around local processing and local record storage. Sensitive source documents, photos, signatures and OCR data should remain outside public repositories.
+
+Future web automation should be explicit and user-controlled, with a review step before submitting data to an external portal.
 
 ## License
 
