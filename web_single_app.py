@@ -33,14 +33,7 @@ def _find_region(image: Image.Image, target: str, api_key: str) -> dict:
     return locate_region(bio.getvalue(), target, api_key, "image/jpeg")
 
 
-def _extract_page(
-    image: Image.Image,
-    page_no: int,
-    stem: str,
-    gemini_key: str,
-    want_photo: bool,
-    want_signature: bool,
-):
+def _extract_page(image: Image.Image, page_no: int, stem: str, gemini_key: str, want_photo: bool, want_signature: bool):
     photo = signature = None
     photo_detection = signature_detection = None
 
@@ -68,7 +61,6 @@ def _extract_page(
         except GeminiCropError as exc:
             st.warning(f"Signature detection on page {page_no}: {exc}")
 
-    # If the upload itself is a portrait photo, local face detection is a useful fallback.
     if want_photo and photo is None:
         try:
             box = base.detect_face_box(image)
@@ -80,7 +72,7 @@ def _extract_page(
     photo_output = process_photo_asset(photo, (300, 400)) if photo is not None else None
     signature_output = process_signature_asset(signature, (300, 100)) if signature is not None else None
     prefix = Path(stem).stem
-    if len(_pages_from_upload.__name__) and (page_no > 1 or stem.lower().endswith(".pdf")):
+    if page_no > 1 or stem.lower().endswith(".pdf"):
         prefix = f"{prefix}_page_{page_no}"
     return photo_output, signature_output, photo_detection, signature_detection, prefix
 
@@ -109,9 +101,6 @@ def _run_ocr(file_name: str, raw: bytes, pages: list[tuple[int, Image.Image]], a
     """Use Datalab's managed Chandra OCR as the primary document OCR engine."""
     if file_name.lower().endswith(".pdf"):
         return base.run_chandra_ocr(file_name, raw, api_key)
-
-    # For a photographed form, OCR the complete uploaded page. This preserves layout and
-    # handwriting better than OCR'ing only the extracted photo/signature regions.
     image = pages[0][1]
     bio = io.BytesIO()
     image.save(bio, "JPEG", quality=94, optimize=True)
@@ -136,14 +125,7 @@ def _render_outputs(result: dict):
         st.markdown("### 📷 Student Photo")
         if photo_previews:
             st.image(photo_previews[0], width=230, caption="AI-cropped • enhanced • white background • 300×400")
-            st.download_button(
-                "⬇ Download Photo",
-                photos[0][1],
-                photos[0][0],
-                "image/jpeg",
-                use_container_width=True,
-                key="download_single_photo",
-            )
+            st.download_button("⬇ Download Photo", photos[0][1], photos[0][0], "image/jpeg", use_container_width=True, key="download_single_photo")
             if len(photos) > 1:
                 st.download_button("⬇ Download all photos (ZIP)", base.zip_outputs(photos), "photos.zip", "application/zip", use_container_width=True)
         else:
@@ -152,14 +134,7 @@ def _render_outputs(result: dict):
         st.markdown("### ✍ Student Signature")
         if signature_previews:
             st.image(signature_previews[0], width=300, caption="AI-cropped • cleaned • white background • 300×100")
-            st.download_button(
-                "⬇ Download Signature",
-                signatures[0][1],
-                signatures[0][0],
-                "image/jpeg",
-                use_container_width=True,
-                key="download_single_signature",
-            )
+            st.download_button("⬇ Download Signature", signatures[0][1], signatures[0][0], "image/jpeg", use_container_width=True, key="download_single_signature")
             if len(signatures) > 1:
                 st.download_button("⬇ Download all signatures (ZIP)", base.zip_outputs(signatures), "signatures.zip", "application/zip", use_container_width=True)
         else:
@@ -211,14 +186,7 @@ def main():
         progress = st.progress(0)
 
         for index, (page_no, image) in enumerate(pages):
-            photo, signature, photo_detection, signature_detection, prefix = _extract_page(
-                image,
-                page_no,
-                uploaded.name,
-                gemini_key if use_ai else "",
-                want_photo,
-                want_signature,
-            )
+            photo, signature, photo_detection, signature_detection, prefix = _extract_page(image, page_no, uploaded.name, gemini_key if use_ai else "", want_photo, want_signature)
             detections.append({"page": page_no, "photo": photo_detection, "signature": signature_detection})
             if photo is not None:
                 all_photos.append((f"{prefix}_photo.jpg", base.encode_jpeg_under_kb(photo, 100)))
@@ -266,13 +234,7 @@ def main():
         markdown = _ocr_text(ocr_result)
         if markdown:
             st.markdown(markdown)
-            st.download_button(
-                "⬇ Download OCR result",
-                markdown,
-                f"{Path(result['source_name']).stem}_chandra.md",
-                "text/markdown",
-                use_container_width=False,
-            )
+            st.download_button("⬇ Download OCR result", markdown, f"{Path(result['source_name']).stem}_chandra.md", "text/markdown", use_container_width=False)
         else:
             st.warning("Chandra completed but returned no readable text.")
 
