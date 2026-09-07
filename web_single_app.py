@@ -1,10 +1,10 @@
-"""Single-file student document workflow for Photo, Signature and OCR."""
+"""Single-file AI-assisted workflow for student forms, photo, signature and OCR."""
 from __future__ import annotations
 
 import io
+import json
 from pathlib import Path
 
-import fitz
 import streamlit as st
 from PIL import Image, ImageOps
 
@@ -23,18 +23,24 @@ def _secrets():
 
 def _pages_from_upload(name: str, raw: bytes) -> list[tuple[int, Image.Image]]:
     if name.lower().endswith(".pdf"):
-        pages = base.pdf_to_images(raw)
-        return [(i + 1, page) for i, page in enumerate(pages)]
+        return [(i + 1, page) for i, page in enumerate(base.pdf_to_images(raw))]
     return [(1, ImageOps.exif_transpose(Image.open(io.BytesIO(raw)).convert("RGB")))]
 
 
-def _find_region(image: Image.Image, target: str, api_key: str):
+def _find_region(image: Image.Image, target: str, api_key: str) -> dict:
     bio = io.BytesIO()
     image.convert("RGB").save(bio, "JPEG", quality=88, optimize=True)
     return locate_region(bio.getvalue(), target, api_key, "image/jpeg")
 
 
-def _extract_page(image: Image.Image, page_no: int, stem: str, gemini_key: str, want_photo: bool, want_signature: bool):
+def _extract_page(
+    image: Image.Image,
+    page_no: int,
+    stem: str,
+    gemini_key: str,
+    want_photo: bool,
+    want_signature: bool,
+):
     photo = signature = None
     photo_detection = signature_detection = None
 
@@ -42,179 +48,241 @@ def _extract_page(image: Image.Image, page_no: int, stem: str, gemini_key: str, 
         try:
             photo_detection = _find_region(
                 image,
-                "the ACTUAL student's passport photograph/photo box on this form; ignore logos, printed sample portraits, ID-card graphics, stamps, and other images; return only the student photo region",
+                "the actual student's passport photograph printed or pasted on this form. Return ONLY the photograph rectangle. Ignore government logos, seals, sample portraits, ID graphics, stamps, and decorative images. The box must include the complete student portrait but as little surrounding form as possible.",
                 gemini_key,
             )
             if photo_detection.get("found"):
-                photo = crop_box(image, photo_detection["box_2d"], padding=0.012)
+                photo = crop_box(image, photo_detection["box_2d"], padding=0.008)
         except GeminiCropError as exc:
-            st.warning(f"Photo AI detection on page {page_no}: {exc}")
+            st.warning(f"Photo detection on page {page_no}: {exc}")
 
     if gemini_key and want_signature:
         try:
             signature_detection = _find_region(
                 image,
-                "the ACTUAL student's handwritten signature specimen on this form; ignore printed text, signature labels, lines, stamps, logos and other marks; return only the signature region",
+                "the actual student's handwritten signature specimen on this form. Return ONLY the rectangle containing the handwritten ink. Ignore the signature label, printed lines, form borders, stamps, logos, typed names and other marks.",
                 gemini_key,
             )
             if signature_detection.get("found"):
-                signature = crop_box(image, signature_detection["box_2d"], padding=0.012)
+                signature = crop_box(image, signature_detection["box_2d"], padding=0.006)
         except GeminiCropError as exc:
-            st.warning(f"Signature AI detection on page {page_no}: {exc}")
+            st.warning(f"Signature detection on page {page_no}: {exc}")
 
-    # Direct-photo fallback: face detection in the original image.
+    # If the upload itself is a portrait photo, local face detection is a useful fallback.
     if want_photo and photo is None:
         try:
-            fallback = base.detect_face_box(image)
-            if fallback:
-                photo = image.crop(fallback)
+            box = base.detect_face_box(image)
+            if box:
+                photo = image.crop(box)
         except Exception:
             pass
 
-    photo_output = process_photo_asset(photo, (200, 230)) if photo is not None else None
-    signature_output = process_signature_asset(signature, (140, 60)) if signature is not None else None
+    photo_output = process_photo_asset(photo, (300, 400)) if photo is not None else None
+    signature_output = process_signature_asset(signature, (300, 100)) if signature is not None else None
     prefix = Path(stem).stem
-    if page_no > 1 or stem.lower().endswith(".pdf"):
+    if len(_pages_from_upload.__name__) and (page_no > 1 or stem.lower().endswith(".pdf")):
         prefix = f"{prefix}_page_{page_no}"
     return photo_output, signature_output, photo_detection, signature_detection, prefix
 
 
-def _drive_uploads(photo_bytes, signature_bytes, stem: str):
+def _drive_uploads(photo_items: list[tuple[str, bytes]], signature_items: list[tuple[str, bytes]]):
     folder_id = get_folder_id(_secrets())
     if not folder_id:
         st.error("GOOGLE_DRIVE_FOLDER_ID is missing in Streamlit Secrets.")
         return
-    if not (photo_bytes or signature_bytes):
+    items = [(name, payload) for name, payload in [*photo_items, *signature_items]]
+    if not items:
         st.warning("There are no extracted assets to upload.")
         return
-    uploaded = []
-    items = []
-    if photo_bytes:
-        items.append((f"{stem}_photo.jpg", photo_bytes))
-    if signature_bytes:
-        items.append((f"{stem}_signature.jpg", signature_bytes))
     progress = st.progress(0)
     for index, (filename, payload) in enumerate(items):
         try:
-            uploaded.append(upload_bytes(filename, payload, "image/jpeg", folder_id=folder_id, secrets=_secrets()))
+            upload_bytes(filename, payload, "image/jpeg", folder_id=folder_id, secrets=_secrets())
         except GoogleDriveError as exc:
             st.error(str(exc))
             return
         progress.progress((index + 1) / len(items))
-    st.success(f"Uploaded {len(uploaded)} asset(s) to Google Drive.")
+    st.success(f"Uploaded {len(items)} asset(s) to Google Drive.")
 
 
-def _ocr(file_name: str, raw: bytes, prepared_image: Image.Image | None, api_key: str):
+def _run_ocr(file_name: str, raw: bytes, pages: list[tuple[int, Image.Image]], api_key: str) -> dict:
+    """Use Datalab's managed Chandra OCR as the primary document OCR engine."""
     if file_name.lower().endswith(".pdf"):
         return base.run_chandra_ocr(file_name, raw, api_key)
+
+    # For a photographed form, OCR the complete uploaded page. This preserves layout and
+    # handwriting better than OCR'ing only the extracted photo/signature regions.
+    image = pages[0][1]
     bio = io.BytesIO()
-    (prepared_image or Image.open(io.BytesIO(raw))).save(bio, "JPEG", quality=92)
-    return base.run_chandra_ocr(f"{Path(file_name).stem}_prepared.jpg", bio.getvalue(), api_key)
+    image.save(bio, "JPEG", quality=94, optimize=True)
+    return base.run_chandra_ocr(f"{Path(file_name).stem}.jpg", bio.getvalue(), api_key)
+
+
+def _ocr_text(result: dict) -> str:
+    value = result.get("markdown") or result.get("text") or ""
+    return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, indent=2)
+
+
+def _render_outputs(result: dict):
+    photos = result.get("photos", [])
+    signatures = result.get("signatures", [])
+    photo_previews = result.get("photo_previews", [])
+    signature_previews = result.get("signature_previews", [])
+
+    st.divider()
+    st.subheader("✅ Portal-ready outputs")
+    left, right = st.columns(2)
+    with left:
+        st.markdown("### 📷 Student Photo")
+        if photo_previews:
+            st.image(photo_previews[0], width=230, caption="AI-cropped • enhanced • white background • 300×400")
+            st.download_button(
+                "⬇ Download Photo",
+                photos[0][1],
+                photos[0][0],
+                "image/jpeg",
+                use_container_width=True,
+                key="download_single_photo",
+            )
+            if len(photos) > 1:
+                st.download_button("⬇ Download all photos (ZIP)", base.zip_outputs(photos), "photos.zip", "application/zip", use_container_width=True)
+        else:
+            st.warning("No student photo was confidently detected.")
+    with right:
+        st.markdown("### ✍ Student Signature")
+        if signature_previews:
+            st.image(signature_previews[0], width=300, caption="AI-cropped • cleaned • white background • 300×100")
+            st.download_button(
+                "⬇ Download Signature",
+                signatures[0][1],
+                signatures[0][0],
+                "image/jpeg",
+                use_container_width=True,
+                key="download_single_signature",
+            )
+            if len(signatures) > 1:
+                st.download_button("⬇ Download all signatures (ZIP)", base.zip_outputs(signatures), "signatures.zip", "application/zip", use_container_width=True)
+        else:
+            st.warning("No student signature was confidently detected.")
 
 
 def main():
-    st.set_page_config(page_title="Photo & Signature Studio", page_icon="📷", layout="wide")
-    st.title("📷 Student Document Studio")
-    st.caption("Upload ONE student form/photo/PDF. The same file is used to extract Photo + Signature and run OCR.")
+    st.set_page_config(page_title="BSEB Photo & Signature AI", page_icon="📷", layout="wide")
+    st.title("📷 BSEB Photo & Signature AI")
+    st.caption("One student form in → AI finds the student's photo and signature → cleans and enhances them → Chandra OCR reads the form.")
 
     gemini_key = get_gemini_key(_secrets())
     datalab_key = base.get_datalab_key()
     uploaded = st.file_uploader(
-        "Upload one student file",
+        "Upload ONE student form, scan or PDF",
         type=["pdf", "jpg", "jpeg", "png", "webp", "bmp", "tif", "tiff"],
         accept_multiple_files=False,
-        help="Upload one photographed/scanned form, one PDF, or one direct student photo.",
+        help="Use the original scanned/photographed BSEB form. Do not crop the form first.",
     )
 
     if not uploaded:
-        st.info("Start here: upload one BSEB/student form. No separate photo, signature or OCR upload is required.")
-        st.markdown("**Pipeline:** Upload → find photo → white background → find signature → clean signature → Chandra OCR → review/download.")
+        st.info("Upload one complete student form. No separate photo, signature or OCR upload is required.")
+        c1, c2, c3 = st.columns(3)
+        c1.markdown("**1. AI detection**\n\nGemini locates the actual student photo and handwritten signature.")
+        c2.markdown("**2. Image processing**\n\nOpenCV/Pillow crops, cleans, enhances and makes the photo background white.")
+        c3.markdown("**3. Chandra OCR**\n\nDatalab Chandra reads the complete form and preserves document layout.")
         return
 
     raw = uploaded.getvalue()
     pages = _pages_from_upload(uploaded.name, raw)
-    st.success(f"Loaded {len(pages)} page(s) from **{uploaded.name}**.")
+    st.success(f"Loaded **{uploaded.name}** • {len(pages)} page(s)")
 
-    with st.expander("Processing options", expanded=True):
-        want_photo = st.checkbox("Extract student photo", True)
-        want_signature = st.checkbox("Extract student signature", True)
-        want_ocr = st.checkbox("Run Chandra OCR", True)
-        use_ai = st.checkbox("Use Gemini to locate photo/signature sections", True)
-        if use_ai and not gemini_key:
-            st.warning("GEMINI_API_KEY is not available, so region detection will use local fallback where possible.")
+    with st.expander("Advanced processing", expanded=False):
+        want_photo = st.checkbox("Extract student photo", True, key="single_want_photo")
+        want_signature = st.checkbox("Extract student signature", True, key="single_want_signature")
+        want_ocr = st.checkbox("Run Chandra OCR", True, key="single_want_ocr")
+        use_ai = st.checkbox("Use Gemini AI detection", True, key="single_use_gemini")
+        if not gemini_key and use_ai:
+            st.warning("Gemini is not configured; photo extraction can fall back to local face detection, but form-region detection will be limited.")
         if want_ocr and not datalab_key:
-            st.warning("DATALAB_API_KEY is not configured; OCR will be skipped until a key is added.")
+            st.error("DATALAB_API_KEY is not configured, so Chandra OCR cannot run yet.")
 
-    if st.button("🚀 PROCESS THIS FILE", type="primary", use_container_width=True):
+    if st.button("🚀 PROCESS STUDENT FILE", type="primary", use_container_width=True):
         all_photos: list[tuple[str, bytes]] = []
         all_signatures: list[tuple[str, bytes]] = []
-        photo_previews = []
-        signature_previews = []
-        prepared_for_ocr = pages[0][1]
+        photo_previews: list[Image.Image] = []
+        signature_previews: list[Image.Image] = []
+        detections = []
         progress = st.progress(0)
 
         for index, (page_no, image) in enumerate(pages):
             photo, signature, photo_detection, signature_detection, prefix = _extract_page(
-                image, page_no, uploaded.name, gemini_key if use_ai else "", want_photo, want_signature
+                image,
+                page_no,
+                uploaded.name,
+                gemini_key if use_ai else "",
+                want_photo,
+                want_signature,
             )
+            detections.append({"page": page_no, "photo": photo_detection, "signature": signature_detection})
             if photo is not None:
-                bio = io.BytesIO(); photo.save(bio, "JPEG", quality=92)
-                payload = base.encode_jpeg_under_kb(photo, 50)
-                all_photos.append((f"{prefix}_photo.jpg", payload)); photo_previews.append(photo)
+                all_photos.append((f"{prefix}_photo.jpg", base.encode_jpeg_under_kb(photo, 100)))
+                photo_previews.append(photo)
             if signature is not None:
-                bio = io.BytesIO(); signature.save(bio, "JPEG", quality=92)
-                payload = base.encode_jpeg_under_kb(signature, 20)
-                all_signatures.append((f"{prefix}_signature.jpg", payload)); signature_previews.append(signature)
+                all_signatures.append((f"{prefix}_signature.jpg", base.encode_jpeg_under_kb(signature, 50)))
+                signature_previews.append(signature)
             progress.progress((index + 1) / len(pages))
+
+        ocr_result = None
+        if want_ocr and datalab_key:
+            with st.spinner("Reading the complete form with Datalab Chandra OCR…"):
+                try:
+                    ocr_result = _run_ocr(uploaded.name, raw, pages, datalab_key)
+                except Exception as exc:
+                    st.error(f"Chandra OCR failed: {exc}")
 
         st.session_state.single_result = {
             "photos": all_photos,
             "signatures": all_signatures,
             "photo_previews": photo_previews,
             "signature_previews": signature_previews,
+            "detections": detections,
+            "ocr": ocr_result,
+            "source_name": uploaded.name,
         }
 
-        st.divider()
-        col1, col2 = st.columns(2)
-        with col1:
-            st.subheader(f"📷 Photos ({len(all_photos)})")
-            if photo_previews:
-                st.image(photo_previews[0], caption="Extracted photo — white background", width=220)
-                st.download_button("⬇ Download photo ZIP", base.zip_outputs(all_photos), "photos.zip", "application/zip", use_container_width=True)
-            else:
-                st.warning("No student photo region was detected.")
-        with col2:
-            st.subheader(f"✍ Signatures ({len(all_signatures)})")
-            if signature_previews:
-                st.image(signature_previews[0], caption="Extracted signature — white background", width=300)
-                st.download_button("⬇ Download signature ZIP", base.zip_outputs(all_signatures), "signatures.zip", "application/zip", use_container_width=True)
-            else:
-                st.warning("No student signature region was detected.")
-
-        if want_ocr and datalab_key:
-            with st.spinner("Sending the uploaded file to Chandra OCR…"):
-                try:
-                    result = _ocr(uploaded.name, raw, prepared_for_ocr, datalab_key)
-                    markdown = result.get("markdown") or ""
-                    st.subheader("📄 OCR result")
-                    if markdown:
-                        st.markdown(markdown)
-                        st.download_button("⬇ Download OCR Markdown", markdown, f"{Path(uploaded.name).stem}_ocr.md", "text/markdown")
-                    else:
-                        st.warning("Chandra returned no markdown text.")
-                except Exception as exc:
-                    st.error(f"OCR failed: {exc}")
-
     result = st.session_state.get("single_result")
-    if result and (result.get("photos") or result.get("signatures")):
-        st.divider()
-        if st.checkbox("☁ Upload extracted Photo + Signature to Google Drive"):
-            if st.button("UPLOAD EXTRACTED ASSETS TO DRIVE", type="secondary"):
-                photo_bytes = result["photos"][0][1] if result.get("photos") else None
-                signature_bytes = result["signatures"][0][1] if result.get("signatures") else None
-                _drive_uploads(photo_bytes, signature_bytes, Path(uploaded.name).stem)
+    if not result:
+        return
 
-    st.caption("Original upload is never modified. Extraction creates new output assets only.")
+    _render_outputs(result)
+
+    detections = result.get("detections", [])
+    if detections:
+        with st.expander("🔎 AI detection details", expanded=False):
+            for item in detections:
+                st.write(f"Page {item['page']}")
+                st.json(item)
+
+    ocr_result = result.get("ocr")
+    if ocr_result:
+        st.divider()
+        st.subheader("📄 Chandra OCR — complete form")
+        markdown = _ocr_text(ocr_result)
+        if markdown:
+            st.markdown(markdown)
+            st.download_button(
+                "⬇ Download OCR result",
+                markdown,
+                f"{Path(result['source_name']).stem}_chandra.md",
+                "text/markdown",
+                use_container_width=False,
+            )
+        else:
+            st.warning("Chandra completed but returned no readable text.")
+
+    if result.get("photos") or result.get("signatures"):
+        st.divider()
+        st.subheader("☁ Optional Google Drive upload")
+        if st.button("UPLOAD ALL EXTRACTED ASSETS TO DRIVE", type="secondary", use_container_width=True):
+            _drive_uploads(result.get("photos", []), result.get("signatures", []))
+
+    st.success("Original form remains unchanged. The downloaded photo and signature are newly generated portal-ready assets.")
 
 
 if __name__ == "__main__":
