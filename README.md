@@ -1,45 +1,118 @@
 # Photo & Signature Studio
 
-A **local/offline Windows desktop utility** for converting photos, signatures, scanned documents, screenshots, and PDF pages into portal-ready image files with exact pixel dimensions, white backgrounds, and configurable file-size limits.
+A **photo, signature, and student-document processing system** for preparing portal-ready student assets, extracting information from hardcopy forms, and supporting registration workflows.
 
-> **Privacy:** Normal image processing is local. The application is designed so identity documents, photos, signatures, and extracted data remain on the user's computer unless the user explicitly uses a future external/web workflow.
+> **Product priority:** Photo, Signature, and OCR are the main features. Supabase reference matching, Google Drive upload, and BSEB portal automation are supporting/automation features around them.
+
+> **Privacy:** Local image processing is designed to keep source documents, photos, signatures, and extracted data on the user's computer unless an explicit web/external workflow is used.
 
 ## 1. Product direction
 
-The project is evolving from a photo/signature utility into a **record-based document preparation system**:
+The project has evolved from a photo/signature utility into a **record-based student document preparation and verification system**.
 
 ```text
-Screenshot / Clipboard / PDF / Image
-                |
-                v
-           Input Inbox
-                |
-                v
-            Record ID
-                |
-       +--------+--------+
-       |        |        |
-     Source    OCR     Assets
-     Files     Data      |
-       |        |    +---+---+
-       |        |   Photo  Signature
-       |        |      |      |
-       +--------+------+------+
-                |
-         Portal-ready files
-                |
-       Future web automation
+Hardcopy / Scan / Photo / PDF
+            |
+            v
+     Single-file Upload
+            |
+      +-----+-----+
+      |           |
+      v           v
+   Gemini      Chandra OCR
+   Vision          |
+      |            v
+      v        OCR / fields
+ Photo region       |
+      |             |
+      v             |
+Photo processing   |
+      |             |
+      +------+------+ 
+             |
+      Signature processing
+             |
+             v
+     Portal-ready assets
+             |
+       +-----+------+
+       |            |
+       v            v
+ Google Drive   Supabase reference
+                   matching
+                     |
+                     v
+              Verified data/assets
+                     |
+                     v
+             BSEB preparation
+                     |
+                     v
+                Human review
+                     |
+                     v
+                  Submit
 ```
 
-Every application/person/document set gets a stable **Record ID**. The Record ID, not a filename, is the relationship key connecting the original document, OCR data, extracted photo, extracted signature, processed assets, and future portal data.
+### Source-of-truth rule
 
-## 2. Current capabilities
+- **Hardcopy/form = current student-provided information.**
+- **Supabase `public.Class_X_reg_2026_2027` = reference/target batch data.**
+- Reference data is used for field-by-field verification; disagreements must never be silently overwritten.
+- **BSEB portal = actual destination.** Portal requirements must be verified against the live destination before submission.
 
-### Supported input
+Every managed desktop record has a stable **Record ID** connecting source documents, OCR, photo, signature, supporting documents, and future portal information.
 
-- Clipboard images using **Ctrl+V**
-- Windows Snipping Tool / Print Screen screenshots copied to the clipboard
-- Images copied from browsers, PDF viewers, scanners, or image editors
+## 2. Current online workflow
+
+The current Streamlit workflow is intentionally **single-file**: upload one complete student form, scan, image, or PDF rather than separately uploading photo, signature, and OCR inputs.
+
+Current web entry point:
+
+`web/app.py` → `web_single_app.py`
+
+Current online application:
+
+`https://photo-signature-studio-gwwj5igdeszojvajhd44sz.streamlit.app/`
+
+Workflow:
+
+```text
+ONE student form/photo/PDF
+          |
+          +----> Gemini finds actual student photo
+          |             |
+          |             v
+          |       OpenCV/Pillow processing
+          |
+          +----> Gemini finds actual handwritten signature
+          |             |
+          |             v
+          |       OpenCV/Pillow processing
+          |
+          +----> Datalab Chandra OCR
+                        |
+                        v
+                  Human review
+                        |
+             +----------+----------+
+             |                     |
+             v                     v
+       Download assets       Optional Drive upload
+             |
+             v
+      Future verification / BSEB workflow
+```
+
+Current web presets are **300×400 photo** and **300×100 signature**, with JPEG size-target optimization. These are application presets, not universal portal specifications.
+
+## 3. Current capabilities
+
+### Input
+
+- Clipboard images using **Ctrl+V** in the Windows application
+- Windows Snipping Tool / Print Screen screenshots
+- Images copied from browsers, PDF viewers, scanners, or editors
 - Clipboard file paths where supported by Windows
 - JPG / JPEG
 - PNG
@@ -48,60 +121,60 @@ Every application/person/document set gets a stable **Record ID**. The Record ID
 - TIFF
 - PDF
 
-### Photo processing
+### Photo
 
-- OpenCV Haar-cascade face detection
-- Conservative portrait crop
-- White background canvas
-- Exact output width/height
-- Optional light enhancement
+- Gemini-assisted student-photo region detection in the web workflow
+- OpenCV face-detection fallback where appropriate
+- Conservative/deterministic crop processing
+- White-background processing
+- Exact output dimensions
+- Light enhancement
 - JPEG KB-target optimization
-- PNG output
+- PNG output in the desktop workflow
 
-### Signature processing
+### Signature
 
-- Dark-ink detection
-- Background normalization
-- Whitespace cropping
+- Gemini-assisted handwritten-signature region detection
+- Dark-ink detection and normalization
+- Whitespace/ink cropping
 - White background
 - Exact output dimensions
-- JPEG/PNG output
+- JPEG/PNG output in the desktop workflow
 
-### PDF processing
+### OCR
 
-- Local PDF opening
-- Local page rendering
-- Multi-page selection
+- Datalab Chandra OCR is the current primary document OCR integration for the web workflow.
+- The architecture keeps OCR provider logic separate from the UI.
+- OCR results can be displayed/downloaded and are intended for human verification before downstream use.
 
-## 3. Clipboard screenshot workflow
+### PDF
 
-A screenshot copied to the Windows clipboard can be pasted directly with **Ctrl+V**. It does not need to be saved first.
+- Local PDF page rendering
+- Multi-page processing
+- Page-by-page photo/signature extraction
+- Complete-PDF OCR through Chandra in the web workflow
 
-```text
-Snipping Tool / Print Screen / Browser / PDF Viewer
-                         |
-                     Copy image
-                         |
-                       Ctrl+V
-                         |
-                Photo & Signature Studio
-                         |
-              Record / Process / OCR later
-```
+### Google Drive
 
-This input route is important for information that is visible on screen but not conveniently downloadable.
+- Optional upload of generated photo/signature assets
+- Shared Drive-compatible upload helper
+- Destination controlled through deployment configuration
 
-## 4. Record-based file management
+### Supabase reference matching
 
-The managed local workspace uses one directory per Record ID. Portal-ready photo and signature files are kept in dedicated directories so they can be selected directly for upload.
+- REST client for the Class X registration reference batch
+- Field-by-field hardcopy/OCR/reference comparison logic
+- Matching is supporting functionality and does not replace human verification
 
-Example:
+## 4. Record-based local file management
+
+The managed local workspace uses one directory per Record ID.
 
 ```text
 data/
 ├── studio.db
 └── records/
-    └── APP-20260907-A1B2C3D4/
+    └── APP-YYYYMMDD-XXXXXXXX/
         ├── source/
         │   ├── application.pdf
         │   └── screenshot.png
@@ -109,218 +182,193 @@ data/
         │   ├── raw_text.txt
         │   └── extracted.json
         ├── photo/
-        │   └── photo_200x230.jpg
+        │   └── photo_*.jpg
         ├── signature/
-        │   └── signature_140x60.jpg
+        │   └── signature_*.jpg
         ├── documents/
-        │   └── supporting_document.pdf
         ├── exports/
         └── portal_manifest.json
 ```
 
-### Why this layout matters
+The Record ID, rather than a generic filename such as `photo.jpg`, is the relationship key connecting the student's source material and generated assets.
 
-The user can open the record folder and immediately find:
-
-- **Photo** → ready to upload to a portal
-- **Signature** → ready to upload to a portal
-- **OCR data** → structured data available for form filling
-- **Source files** → original evidence
-- **Documents** → supporting files
-- **Manifest** → machine-readable relationship information
-
-The system does not depend on filenames such as `photo.jpg` or `signature.jpg` to decide which person they belong to. The Record ID provides that relationship.
-
-## 5. Local database and storage layer
-
-SQLite stores metadata and relationships; binary files stay in the record folders.
-
-Current foundation modules:
-
-```text
-core/
-├── database.py
-│   └── Records, documents, OCR results and assets
-├── records.py
-│   └── Standard Record ID folder layout
-├── storage.py
-│   └── Managed source/photo/signature/document directories
-└── record_service.py
-    └── High-level creation, source-file, portal-asset and OCR storage
-
-oCR/
-└── interface.py
-    └── Provider-neutral OCR interface
-
-automation/
-└── __init__.py
-    └── Boundary for future browser/web automation
-```
-
-The service layer can store:
-
-```text
-Record
-  ├── source document
-  ├── OCR text
-  ├── structured OCR JSON
-  ├── photo asset
-  ├── signature asset
-  ├── supporting documents
-  └── portal-ready outputs
-```
-
-## 6. OCR and Chandra OCR
-
-The intended OCR architecture is provider-neutral:
-
-```text
-                 OCR Manager
-                     |
-          +----------+----------+
-          |                     |
-     Chandra OCR          Future OCR engine
-          |                     |
-          +----------+----------+
-                     |
-              Normalized OCR
-                     |
-             Structured data
-                     |
-                  Record ID
-```
-
-**Chandra OCR is the planned primary OCR/document-understanding integration.** It will plug into the OCR interface rather than being embedded throughout the UI.
-
-Potential capabilities:
-
-- OCR text extraction
-- Structured field extraction
-- Document/page classification
-- Form-field detection
-- Photo-region detection
-- Signature-region detection
-- Extraction of photo/signature from scanned documents
-- Linking extracted assets to source document/page/region
-- OCR-assisted extraction of portal requirements
-- Confidence/verification information
-
-> **Chandra OCR is not yet implemented.** The repository currently contains the provider-neutral OCR boundary and storage architecture needed for the integration.
-
-## 7. Future portal/web automation
-
-The normalized Record should become the single source of truth for future web automation.
-
-```text
-Record
-  |
-  +-- Person data
-  +-- OCR data
-  +-- Photo file
-  +-- Signature file
-  +-- Supporting documents
-           |
-           v
-   Portal Automation Adapter
-           |
-      Browser automation
-           |
-      Fill -> Upload
-           |
-         Review
-           |
-   User confirmation
-           |
-        Submit
-```
-
-Example future mapping:
-
-```text
-Portal field             Record source
----------------------------------------
-Candidate Name       <-  person.name
-Father Name          <-  person.father_name
-Date of Birth        <-  person.date_of_birth
-Photo upload         <-  photo/photo_*.jpg
-Signature upload     <-  signature/signature_*.jpg
-Supporting document  <-  documents/*
-```
-
-The preferred workflow is **Prepare → Fill → Review → User Confirmation → Submit**, rather than blind submission.
-
-Web automation is not implemented yet.
-
-## 8. Important accuracy note
-
-Portal requirements must always be checked against the actual destination website/form. Presets are convenience configurations, not authoritative specifications.
-
-Before submission, verify:
-
-- Photo framing
-- Head visibility where required
-- White background where required
-- Signature legibility
-- Exact pixel dimensions
-- File size
-- File format
-- OCR-extracted data
-- Correct Record ID and linked files
-
-## 9. Repository file structure
+## 5. Repository architecture
 
 ```text
 photo-signature-studio/
 │
-├── app.py
+├── app.py                         # Windows Photo/Signature Studio
+├── main.py                        # Desktop launcher
+├── web_app.py                     # Shared web processing/OCR utilities
+├── web_single_app.py              # Current single-file Streamlit workflow
+├── web/
+│   ├── app.py                     # Streamlit Cloud entrypoint
+│   └── requirements.txt
+│
 ├── core/
-│   ├── __init__.py
-│   ├── database.py
-│   ├── records.py
-│   ├── storage.py
-│   └── record_service.py
+│   ├── asset_processing.py        # Deterministic photo/signature processing
+│   ├── database.py                # SQLite metadata/relationships
+│   ├── records.py                 # Record directory layout
+│   ├── storage.py                 # Managed file storage
+│   ├── record_service.py          # High-level record operations
+│   ├── record_manifest.py         # Portal manifest
+│   ├── student_matcher.py         # Hardcopy/reference comparison
+│   ├── supabase_client.py         # Supabase REST reference access
+│   ├── gemini_crop.py             # Gemini region detection
+│   └── google_drive.py             # Google Drive upload helper
+│
 ├── ocr/
-│   ├── __init__.py
-│   └── interface.py
+│   └── interface.py               # Provider-neutral OCR boundary
+│
 ├── automation/
-│   └── __init__.py
+│   └── __init__.py                # Future browser/web automation boundary
+│
+├── KNOWLEDGE_BASE.md              # Environment troubleshooting/runbook
 ├── requirements.txt
 ├── build_windows.bat
 ├── README.md
-├── .gitignore
-└── .github/
-    └── workflows/
-        └── windows-build.yml
+└── .github/workflows/windows-build.yml
 ```
 
-## 10. Requirements
+## 6. OCR architecture
 
-### Running from source
-
-- Windows 10/11 recommended
-- Python 3.11 or 3.12 recommended
-- Internet is initially required to install Python packages
-- Normal image processing is local/offline after dependencies are installed
-
-### Python dependencies
-
-- **Pillow** — images and clipboard
-- **OpenCV** — face/ink detection
-- **NumPy** — image operations
-- **PyMuPDF** — PDF rendering
-- **PyInstaller** — Windows EXE packaging
-
-## 11. Run from source
-
-```bat
-python -m venv .venv
-.venv\Scripts\activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-python app.py
+```text
+                 OCR Manager / Web Workflow
+                           |
+                    Datalab Chandra OCR
+                           |
+                           v
+                  OCR text + document layout
+                           |
+                           v
+                  Structured/verified data
+                           |
+                           v
+                         Record
 ```
 
-## 12. Build Windows EXE
+Chandra is currently integrated into the online single-file workflow. The provider-neutral OCR boundary remains useful for future engines and desktop integration.
+
+## 7. Gemini Vision architecture
+
+Gemini is used for **region detection**, not as a replacement for deterministic image processing.
+
+```text
+Full student form
+       |
+       v
+Gemini Vision
+       |
+       +--> actual student photo box
+       |
+       +--> actual handwritten signature box
+       |
+       v
+OpenCV / Pillow deterministic processing
+       |
+       v
+Portal-ready asset
+```
+
+Detection requests use structured JSON with normalized `[ymin, xmin, ymax, xmax]` coordinates. The prompts explicitly exclude logos, seals, sample portraits, printed signature lines, stamps, and decorative graphics.
+
+## 8. Supabase reference workflow
+
+Reference data is supporting data, not the source of the current hardcopy information.
+
+```text
+Hardcopy / OCR current values
+             |
+             v
+      Field-by-field compare
+             ^
+             |
+Supabase Class_X_reg_2026_2027
+             |
+             v
+       Match / Close / Mismatch
+             |
+             v
+        Human verification
+```
+
+The desktop/web client must not expose Supabase secret/service-role credentials. Access should use the appropriate public/publishable configuration with database grants and RLS controlling access.
+
+## 9. BSEB workflow
+
+The preferred workflow is:
+
+```text
+Prepare
+  ↓
+OCR / extract
+  ↓
+Compare with reference
+  ↓
+Verify student information
+  ↓
+Prepare photo + signature
+  ↓
+Fill portal
+  ↓
+Upload assets
+  ↓
+Review
+  ↓
+USER CONFIRMS SUBMISSION
+```
+
+Authentication, CAPTCHA, OTP, and other portal security controls must not be bypassed.
+
+## 10. Important troubleshooting knowledge
+
+### OpenCV EXE: `CascadeClassifier::detectMultiScale` assertion
+
+Known error:
+
+```text
+error: (-215:Assertion failed) !empty() in function 'cv::CascadeClassifier::detectMultiScale'
+```
+
+Cause: OpenCV Haar-cascade XML data was missing from the packaged Windows executable even though the source installation worked.
+
+Recorded fix:
+
+`423b5b6ccd8f939f1a57fc73b86b8c3d2c36aa12` — **Fix packaged OpenCV face detection data**.
+
+Rule: when source works but the packaged EXE fails inside OpenCV cascade loading, inspect PyInstaller data files before changing the detection algorithm.
+
+### Streamlit Secrets / TOML
+
+Keep each assignment on one line:
+
+```toml
+DATALAB_API_KEY = "YOUR_DATALAB_KEY"
+GEMINI_API_KEY = "YOUR_GEMINI_KEY"
+GOOGLE_DRIVE_FOLDER_ID = "YOUR_FOLDER_ID"
+```
+
+Never commit actual keys.
+
+### Google Drive
+
+The service account must have access to the destination folder/Shared Drive. `GOOGLE_DRIVE_FOLDER_ID` identifies the destination; the service-account JSON is secret configuration.
+
+### Gemini detection
+
+If the wrong image is detected, first tighten the region-detection prompt and inspect the AI detection details. Do not compensate with arbitrary cropping that could cut off the student's photo/signature.
+
+### OCR failure
+
+Check the Datalab key, input readability, provider response, and deployment configuration. Keep the original upload unchanged.
+
+### PDF failure
+
+Determine whether the failure is PDF rendering, page selection, AI detection, or OCR. Diagnose the specific layer instead of changing unrelated processing code.
+
+A detailed, reusable runbook is maintained in **[KNOWLEDGE_BASE.md](KNOWLEDGE_BASE.md)**.
+
+## 11. Windows build
 
 Developer build:
 
@@ -334,102 +382,126 @@ Output:
 dist\PhotoSignatureStudio.exe
 ```
 
-The `.bat` file is a build tool. End users should run `PhotoSignatureStudio.exe`.
+GitHub Actions produces the `PhotoSignatureStudio-Windows` artifact.
 
-## 13. GitHub Actions Windows build
+Web-only changes should not require a Windows build where the workflow path filters permit avoiding it.
 
-The workflow in `.github/workflows/windows-build.yml` builds the standalone Windows executable and uploads it as an artifact.
+## 12. Requirements
 
-Artifact:
+### Source / Windows
 
-```text
-PhotoSignatureStudio-Windows
-└── PhotoSignatureStudio.exe
+- Windows 10/11 recommended
+- Python 3.11 or 3.12 recommended
+- Python dependencies from `requirements.txt`
+
+### Main dependencies
+
+- **Pillow** — image/clipboard processing
+- **OpenCV** — face/ink detection and image processing
+- **NumPy** — numerical image operations
+- **PyMuPDF** — PDF rendering
+- **PyInstaller** — Windows packaging
+
+### Web dependencies
+
+The Streamlit web environment additionally uses requests, `opencv-python-headless`, Google API/auth libraries and the configured external OCR/AI integrations.
+
+## 13. Run from source
+
+```bat
+python -m venv .venv
+.venv\Scripts\activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python app.py
 ```
 
-## 14. Roadmap
+## 14. Current project status
 
-### Phase 1 — Record management
+### Working / implemented
 
-- Record-management UI
-- New/open/search records
-- Automatic Record ID creation
-- Managed source/photo/signature/document folders
-- One-click **Open Record Folder**
-- One-click **Copy Photo Path** and **Copy Signature Path**
-- Record-level export/backup
-
-### Phase 2 — Document intelligence
-
-- Chandra OCR integration
-- Structured data extraction
-- OCR verification/editing
-- Automatic document/page classification
-- Photo and signature region detection
-- Automatic extraction and linking to the correct Record ID
-- Portal requirement extraction where technically feasible
-
-### Phase 3 — Processing productivity
-
-- Batch processing
-- Drag-and-drop
-- Portal presets
-- Application kits
-- Duplicate detection
-- Hindi/English interface
-- Large-file memory controls
-- Background processing/progress/cancellation
-
-### Phase 4 — Web automation
-
-- Browser automation framework
-- Portal-specific adapters
-- Field mapping from Record data to portal fields
-- Upload linked photo/signature/document files
-- Pre-submission validation
-- User review and confirmation
-- Automation logs
-
-## 15. Current project status
-
-**Functional offline MVP + record/OCR/storage architecture foundation**
-
-### Implemented now
-
-- Windows desktop GUI
-- Clipboard image/screenshot paste with Ctrl+V
-- Clipboard file-path support where available
+- Windows desktop Photo & Signature Studio
+- Clipboard screenshot/image workflow
 - Image and PDF input
 - Photo processing
-- Signature cleanup
-- Exact pixel dimensions
-- KB-target JPEG optimization
-- Preview/export
+- Signature processing
+- Exact output dimensions
+- JPEG size optimization
 - Standalone Windows build
-- GitHub Actions build artifact
-- SQLite relationship foundation
-- Record-oriented storage layer
-- Dedicated photo/signature directories
-- OCR storage format
-- Provider-neutral OCR interface
-- Future automation boundary
+- GitHub Actions Windows build
+- Record-oriented SQLite/storage foundation
+- Single-file online student workflow
+- Gemini-assisted photo/signature region detection
+- Datalab Chandra OCR web integration
+- Google Drive upload helper
+- Supabase Class X reference matching foundation
+- Environment troubleshooting knowledge base
 
-### Not yet implemented
+### Still evolving
 
-- Chandra OCR engine
+- More reliable form-specific extraction across diverse BSEB layouts
 - Full record-management UI
-- Automatic structured data extraction
-- Automatic photo/signature extraction from documents
-- Browser/web automation
-- AI background removal
+- Structured OCR field verification UI
 - Batch processing
-- Installer package
+- More portal-specific presets
+- Portal automation adapters
+- Pre-submission validation and audit logs
 
-## 16. Privacy and security
+## 15. Known important commits
 
-The application is designed around local processing and local record storage. Sensitive source documents, photos, signatures and OCR data should remain outside public repositories.
+| Commit | Purpose |
+|---|---|
+| `423b5b6ccd8f939f1a57fc73b86b8c3d2c36aa12` | Fix packaged OpenCV face detection data |
+| `780a9306dabe9c1293edd9f89df93b2878a8f8` | Add hardcopy-to-reference student matching logic |
+| `efbb6f9610221098205a556d11b270946a32e456` | Add Supabase REST client |
+| `fdfa7a0c7dba68226cac97d44c799d32cc65afb7` | Add deterministic photo/signature asset processing |
+| `f258c19e4f6ee6d518a24d12bf1dce94d7a26b7` | Add single-file AI-assisted student workflow |
+| `380b7199cb7e7a11b635cac008fa79996514920` | Point Streamlit entrypoint to single-file workflow |
+| `b58e58e8e6e38d48b9dc12d8daf6a4ce49cc5035` | Enable PDF input for photo/signature processing |
+| `8d078b4c7aac9dd2ed635f7ec4a4219eccba1c53` | Add enhanced AI/PDF/Drive workflow wrapper |
+| `de8eb306ed816e4c27eea9c5231fb42b208f5e6e` | Add Shared Drive-compatible upload support |
+| `3e975583fb6345c99ec399f687823ede0ac6de4a` | Add environment knowledge base |
 
-Future web automation should be explicit and user-controlled, with a review step before submitting data to an external portal.
+## 16. Security and change control
+
+- Never commit API keys, passwords, OTPs, CAPTCHA values, service-account private keys, or confidential student data.
+- If a secret is exposed, revoke/rotate it immediately.
+- Do not use Supabase service-role/secret keys in public clients.
+- Treat the hardcopy as the current-data source and reference databases as verification sources.
+- Do not bypass BSEB authentication/CAPTCHA/OTP controls.
+- Test changes in staging/development before production.
+- Preserve the original uploaded document; generated assets are separate outputs.
+
+## 17. Knowledge-base maintenance
+
+Every verified environment-specific troubleshooting discovery should be added to **[KNOWLEDGE_BASE.md](KNOWLEDGE_BASE.md)** using this pattern:
+
+```text
+### YYYY-MM-DD — Short problem title
+
+Environment:
+- ...
+
+Symptom:
+- ...
+
+Root cause:
+- ...
+
+Fix:
+- ...
+
+Verification:
+- ...
+
+Commit:
+- ...
+
+Future prevention:
+- ...
+```
+
+Record verified facts, not guesses. Never store secrets or confidential student information in the knowledge base.
 
 ## License
 
