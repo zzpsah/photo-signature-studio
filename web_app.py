@@ -40,16 +40,6 @@ def encode_jpeg_under_kb(image: Image.Image, max_kb: int) -> bytes:
     return bio.getvalue()
 
 
-def render_pdf_page(payload: bytes, page_index: int) -> Image.Image:
-    document = fitz.open(stream=payload, filetype="pdf")
-    try:
-        page = document.load_page(page_index)
-        pix = page.get_pixmap(matrix=fitz.Matrix(2.2, 2.2), alpha=False)
-        return Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-    finally:
-        document.close()
-
-
 def detect_face_box(image: Image.Image):
     gray = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2GRAY)
     cascade = cv2.CascadeClassifier(os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_default.xml"))
@@ -132,6 +122,16 @@ def run_chandra_ocr(file_name: str, payload: bytes, api_key: str) -> dict:
     raise TimeoutError("Chandra OCR did not finish within 3 minutes")
 
 
+def render_pdf_page(payload: bytes, page_index: int) -> Image.Image:
+    document = fitz.open(stream=payload, filetype="pdf")
+    try:
+        page = document.load_page(page_index)
+        pix = page.get_pixmap(matrix=fitz.Matrix(2.2, 2.2), alpha=False)
+        return Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+    finally:
+        document.close()
+
+
 def form_editor(original: Image.Image, editor_key: str) -> tuple[bytes, str]:
     if st.session_state.get("form_editor_key") != editor_key:
         st.session_state.form_editor_key = editor_key
@@ -141,24 +141,19 @@ def form_editor(original: Image.Image, editor_key: str) -> tuple[bytes, str]:
     st.caption("Designed for photographed/scanned forms: rotate, straighten, detect the paper boundary, remove borders, and clean uneven lighting. The uploaded original is never changed.")
     c1, c2, c3, c4, c5 = st.columns(5)
     if c1.button("↶ Left", use_container_width=True, key=f"left_{editor_key}"):
-        settings.quarter_turns -= 1
-        st.rerun()
+        settings.quarter_turns -= 1; st.rerun()
     if c2.button("↷ Right", use_container_width=True, key=f"right_{editor_key}"):
-        settings.quarter_turns += 1
-        st.rerun()
+        settings.quarter_turns += 1; st.rerun()
     if c3.button("📐 Auto deskew", use_container_width=True, key=f"deskew_{editor_key}"):
         working = original
         if settings.perspective:
             working, _ = perspective_correct(working)
-        settings.deskew_angle = estimate_deskew_angle(working)
-        st.rerun()
+        settings.deskew_angle = estimate_deskew_angle(working); st.rerun()
     if c4.button("▱ Detect page", use_container_width=True, key=f"perspective_{editor_key}"):
-        settings.perspective = True
-        st.rerun()
+        settings.perspective = True; st.rerun()
     if c5.button("↺ Reset", use_container_width=True, key=f"reset_{editor_key}"):
-        st.session_state.form_editor_settings = FormEditSettings()
-        st.rerun()
-    st.write(f"**Current correction:** quarter turns {settings.quarter_turns % 4}, deskew {settings.deskew_angle:+.2f}°, fine rotation {settings.fine_angle:+.1f}°")
+        st.session_state.form_editor_settings = FormEditSettings(); st.rerun()
+    st.write(f"**Correction:** turns {settings.quarter_turns % 4}, deskew {settings.deskew_angle:+.2f}°, fine {settings.fine_angle:+.1f}°")
     settings.fine_angle = st.slider("Fine rotation / straighten", -15.0, 15.0, float(settings.fine_angle), 0.1, key=f"fine_{editor_key}")
     st.markdown("**Crop unwanted paper/background**")
     a, b = st.columns(2)
@@ -180,9 +175,35 @@ def form_editor(original: Image.Image, editor_key: str) -> tuple[bytes, str]:
     preview = apply_settings(original, settings)
     st.image(preview, caption=f"Prepared OCR preview — {preview.width} × {preview.height}px", width="stretch")
     prepared = prepare_jpeg(preview)
-    summary = f"quarter turns {settings.quarter_turns % 4}, deskew {settings.deskew_angle:+.2f}°, fine {settings.fine_angle:+.1f}°, page detection {'on' if settings.perspective else 'off'}"
+    summary = f"turns {settings.quarter_turns % 4}, deskew {settings.deskew_angle:+.2f}°, fine {settings.fine_angle:+.1f}°, page detection {'on' if settings.perspective else 'off'}"
     st.download_button("⬇ Download prepared page", prepared, "prepared_form.jpg", "image/jpeg", key=f"download_{editor_key}")
     return prepared, summary
+
+
+def pdf_to_images(payload: bytes) -> list[Image.Image]:
+    document = fitz.open(stream=payload, filetype="pdf")
+    try:
+        pages = []
+        for page in document:
+            pix = page.get_pixmap(matrix=fitz.Matrix(2.2, 2.2), alpha=False)
+            pages.append(Image.frombytes("RGB", [pix.width, pix.height], pix.samples))
+        return pages
+    finally:
+        document.close()
+
+
+def process_media_for_assets(uploaded, processor, label: str, width: int, height: int, max_kb: int, face_crop: bool = False):
+    raw = uploaded.getvalue()
+    if uploaded.name.lower().endswith(".pdf"):
+        pages = pdf_to_images(raw)
+        page = st.number_input(f"{label} PDF page", 1, len(pages), 1, key=f"{label}_pdf_page_{uploaded.name}")
+        image = pages[int(page) - 1]
+        st.image(image, caption=f"Source PDF page {page}", width="stretch")
+        result = processor(image, width, height, face_crop) if label == "Photo" else processor(image, width, height)
+        return [(f"{Path(uploaded.name).stem}_page_{page}_{label.lower()}.jpg", encode_jpeg_under_kb(result, max_kb))]
+    image = Image.open(io.BytesIO(raw))
+    result = processor(image, width, height, face_crop) if label == "Photo" else processor(image, width, height)
+    return [(f"{Path(uploaded.name).stem}_{label.lower()}.jpg", encode_jpeg_under_kb(result, max_kb))]
 
 
 def main():
@@ -190,40 +211,35 @@ def main():
     st.title("📷 Photo & Signature Studio")
     st.caption("Online version — prepare forms, OCR them, process photos/signatures, and verify student data.")
     tabs = st.tabs(["📷 Photo", "✍ Signature", "📄 Student Form / OCR", "🔎 Reference Match"])
-
     with tabs[0]:
         st.subheader("Photo processing")
         preset = st.selectbox("Preset", list(PHOTO_PRESETS), key="photo_preset")
         width, height, max_kb = PHOTO_PRESETS[preset]
         face_crop = st.checkbox("Automatic face crop", True, key="photo_face")
-        files = st.file_uploader("Upload one or more student photos", type=["jpg", "jpeg", "png", "webp", "bmp", "tif", "tiff"], accept_multiple_files=True, key="photos")
+        files = st.file_uploader("Upload one or more student photos or PDFs", type=["pdf", "jpg", "jpeg", "png", "webp", "bmp", "tif", "tiff"], accept_multiple_files=True, key="photos")
         if files and st.button("PROCESS PHOTOS", type="primary"):
             outputs, progress = [], st.progress(0)
             for index, uploaded in enumerate(files):
-                result = process_photo(Image.open(uploaded), width, height, face_crop)
-                outputs.append((f"{Path(uploaded.name).stem}_photo.jpg", encode_jpeg_under_kb(result, max_kb)))
+                outputs.extend(process_media_for_assets(uploaded, process_photo, "Photo", width, height, max_kb, face_crop))
                 progress.progress((index + 1) / len(files))
-            st.success(f"Processed {len(outputs)} photo(s).")
+            st.success(f"Processed {len(outputs)} photo asset(s).")
             if outputs:
                 st.image(Image.open(io.BytesIO(outputs[0][1])), caption=outputs[0][0], width=220)
-                st.download_button("⬇ Download all photos (ZIP)", zip_outputs(outputs), "photos_processed.zip", "application/zip")
-
+                st.download_button("⬇ Download photos (ZIP)", zip_outputs(outputs), "photos_processed.zip", "application/zip")
     with tabs[1]:
         st.subheader("Signature processing")
         preset = st.selectbox("Preset", list(SIGNATURE_PRESETS), key="signature_preset")
         width, height, max_kb = SIGNATURE_PRESETS[preset]
-        files = st.file_uploader("Upload one or more signature images", type=["jpg", "jpeg", "png", "webp", "bmp", "tif", "tiff"], accept_multiple_files=True, key="signatures")
+        files = st.file_uploader("Upload one or more signature images or PDFs", type=["pdf", "jpg", "jpeg", "png", "webp", "bmp", "tif", "tiff"], accept_multiple_files=True, key="signatures")
         if files and st.button("PROCESS SIGNATURES", type="primary"):
             outputs, progress = [], st.progress(0)
             for index, uploaded in enumerate(files):
-                result = process_signature(Image.open(uploaded), width, height)
-                outputs.append((f"{Path(uploaded.name).stem}_signature.jpg", encode_jpeg_under_kb(result, max_kb)))
+                outputs.extend(process_media_for_assets(uploaded, process_signature, "Signature", width, height, max_kb))
                 progress.progress((index + 1) / len(files))
-            st.success(f"Processed {len(outputs)} signature(s).")
+            st.success(f"Processed {len(outputs)} signature asset(s).")
             if outputs:
                 st.image(Image.open(io.BytesIO(outputs[0][1])), caption=outputs[0][0], width=300)
-                st.download_button("⬇ Download all signatures (ZIP)", zip_outputs(outputs), "signatures_processed.zip", "application/zip")
-
+                st.download_button("⬇ Download signatures (ZIP)", zip_outputs(outputs), "signatures_processed.zip", "application/zip")
     with tabs[2]:
         st.subheader("Student Form → Prepare → Chandra OCR")
         st.info("Use the document editor for photographed/scanned BSEB-style forms. Correct the page before OCR; then compare extracted values with the Supabase reference record. No value is silently overwritten.")
@@ -286,8 +302,7 @@ def main():
                                 st.download_button("⬇ Download OCR Markdown", markdown, f"{Path(form_file.name).stem}_ocr.md", "text/markdown")
                             except Exception as exc:
                                 st.error(f"OCR failed: {exc}")
-        st.caption("Recommended flow: scan/photograph → document correction → Chandra OCR → field-by-field verification → photo/signature processing → BSEB preparation.")
-
+        st.caption("Recommended flow: photograph/scan → document correction → Chandra OCR → field-by-field verification → photo/signature processing → BSEB preparation.")
     with tabs[3]:
         st.subheader("Supabase Class X reference lookup")
         query = st.text_input("Application No / Name / Father Name / Mother Name")
