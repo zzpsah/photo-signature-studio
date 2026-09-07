@@ -7,7 +7,7 @@ signatures and generated outputs. Filenames are not used as the relationship key
 from pathlib import Path
 
 
-RECORD_SUBDIRECTORIES = ("source", "ocr", "identity", "processed", "documents")
+RECORD_SUBDIRECTORIES = ("source", "ocr", "photo", "signature", "documents", "exports")
 
 
 def record_root(base_dir: str | Path, record_uid: str) -> Path:
