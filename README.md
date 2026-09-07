@@ -1,48 +1,55 @@
 # Photo & Signature Studio
 
-A **local/offline Windows desktop utility** for converting photos, signatures, scanned documents, and PDF pages into portal-ready image files with exact pixel dimensions, white backgrounds, and configurable file-size limits.
+A **local/offline Windows desktop utility** for converting photos, signatures, scanned documents, screenshots, and PDF pages into portal-ready image files with exact pixel dimensions, white backgrounds, and configurable file-size limits.
 
 > **Privacy:** Processing is designed to happen locally on the computer. The application does not upload identity documents, photographs, or signatures to a cloud service.
 
 ## 1. What the application does
 
-The main workflow is:
+The current MVP handles photo/signature preparation. The architecture is being extended toward a record-based document processing system:
 
 ```text
-PDF / Image / Clipboard
-          |
-          v
-    Input Processor
-          |
-          +------------------+
-          |                  |
-          v                  v
-       PHOTO             SIGNATURE
-          |                  |
-    Face detection      Ink detection
-    Portrait crop       Background cleanup
-    White background    White background
-    Exact dimensions    Exact dimensions
+PDF / Image / Clipboard / Screenshot
+                  |
+                  v
+             Input Inbox
+                  |
+          +-------+--------+
+          |                |
+          v                v
+       Document          Photo / Signature
+          |                |
+          v                v
+    Future OCR          Image Processing
+    + Chandra OCR            |
           |                  |
           +--------+---------+
-                   |
                    v
-            JPEG/PNG output
+              Record / ID
                    |
-                   v
-          KB-size optimization
+        +----------+----------+
+        |          |          |
+      Data       Assets     Files
+        |          |          |
+        +----------+----------+
+                   |
+             Future Web
+              Automation
 ```
 
 ### Supported input
 
-- Clipboard image (`Ctrl+V`)
+- Clipboard images using **Ctrl+V**
+- Windows Snipping Tool / Print Screen screenshots copied to the clipboard
+- Images copied from browsers, PDF viewers, scanners, or image editors
+- Clipboard file paths where supported by Windows
 - JPG / JPEG
 - PNG
 - WebP
 - BMP
 - TIFF
 - PDF
-- Drag-and-drop can be added to the UI in a future release
+- Drag-and-drop is planned for a future release
 
 ### Photo processing
 
@@ -69,7 +76,174 @@ PDF / Image / Clipboard
 - Renders PDF pages for processing
 - Supports selecting a page from a multi-page PDF
 
-## 2. Important accuracy note
+## 2. Clipboard screenshot workflow
+
+A screenshot copied to the Windows clipboard is treated as an image input. The current application can receive it through **Ctrl+V** without requiring the screenshot to be saved first.
+
+```text
+Snipping Tool / Print Screen / browser / PDF viewer
+                         |
+                    Copy screenshot
+                         |
+                       Ctrl+V
+                         |
+                  Photo & Signature Studio
+                         |
+              Process / OCR / Extract later
+```
+
+This is deliberately part of the input model because some workflows provide information only through a visible screen rather than a directly downloadable file.
+
+## 3. Record-based data and file management
+
+Future document/OCR features will use a stable **Record ID** instead of relying on filenames to determine relationships.
+
+Example:
+
+```text
+APP-2026-000125/
+├── source/
+│   ├── application.pdf
+│   └── screenshot.png
+├── ocr/
+│   ├── raw_text.txt
+│   └── extracted.json
+├── identity/
+│   ├── photo.jpg
+│   └── signature.jpg
+├── processed/
+│   ├── photo_200x230.jpg
+│   └── signature_140x60.jpg
+└── documents/
+```
+
+The record database will maintain relationships such as:
+
+```text
+Record
+  |
+  +-- Source document
+  |      +-- Page
+  |      +-- OCR result
+  |      +-- Photo region -> photo asset
+  |      +-- Signature region -> signature asset
+  |
+  +-- Extracted person/data fields
+  |
+  +-- Processed photo
+  +-- Processed signature
+  +-- Generated documents
+```
+
+This prevents accidental mixing when files have generic names such as `scan.pdf`, `photo.jpg`, or `signature.jpg`.
+
+## 4. Local data architecture
+
+A local SQLite database is being introduced as the metadata/relationship layer. Binary documents and images remain in local record folders.
+
+Current foundation modules:
+
+```text
+core/
+├── __init__.py
+├── database.py       SQLite schema and record metadata
+└── records.py        Record-linked local folder layout
+
+oCR/
+├── __init__.py
+└── interface.py      Provider-neutral OCR interface
+
+automation/
+└── __init__.py       Future browser/web automation boundary
+```
+
+The database schema provides foundations for:
+
+- Records
+- Source documents
+- OCR results
+- Extracted assets
+- Photo/signature relationships
+- Source page and region references
+
+The database foundation is present now; the full record-management UI and automatic linking workflow are planned enhancements.
+
+## 5. OCR and Chandra OCR roadmap
+
+The intended OCR architecture is provider-neutral:
+
+```text
+                 OCR Manager
+                     |
+          +----------+----------+
+          |                     |
+     Chandra OCR          Future OCR engine
+          |                     |
+          +----------+----------+
+                     |
+              Normalized OCR
+                     |
+             Structured data
+                     |
+                Record ID
+```
+
+**Chandra OCR is the planned primary OCR/document-understanding integration.** It will be placed behind the `OCREngine` interface so the desktop UI and record-management system do not depend directly on one OCR provider.
+
+Potential capabilities include:
+
+- OCR text extraction
+- Structured field extraction
+- Document/page classification
+- Detection of form fields
+- Detection of photo and signature regions
+- Linking extracted photo/signature assets back to their source document and page
+- OCR-assisted extraction of portal requirements where technically feasible
+- Confidence/verification information so uncertain OCR is not silently treated as fact
+
+> **Chandra OCR is not yet implemented in the current MVP.** The current code contains only the integration boundary/foundation.
+
+## 6. Future web automation architecture
+
+The application is intentionally being structured so future web automation can consume the same normalized records instead of reading desktop UI controls directly.
+
+```text
+                    Record / Data
+                         |
+                 Automation Adapter
+                         |
+              +----------+----------+
+              |                     |
+        Portal Adapter A      Portal Adapter B
+              |                     |
+              +----------+----------+
+                         |
+                  Browser Automation
+                         |
+              Fill -> Upload -> Review
+                         |
+                  User confirmation
+                         |
+                      Submit
+```
+
+Portal-specific mappings can eventually look like:
+
+```text
+Portal field          Record field
+-----------------------------------
+Candidate Name    <-  person.name
+Father Name       <-  person.father_name
+DOB               <-  person.date_of_birth
+Photo             <-  linked photo asset
+Signature         <-  linked signature asset
+```
+
+The preferred safety model is **Prepare → Fill → Review → User Confirmation → Submit**, rather than blind automatic submission.
+
+Web automation is **not implemented in the current MVP**. The `automation/` package marks the architectural boundary for future development.
+
+## 7. Important accuracy note
 
 The application is intended to make image preparation fast, but **portal requirements must always be checked against the destination website/form**.
 
@@ -85,63 +259,59 @@ Before submitting an important application, visually verify:
 - Pixel dimensions are correct
 - File size is within the portal limit
 - File format is accepted
+- OCR-extracted data is correct
 
-## 3. Repository file structure
+## 8. Repository file structure
 
 ```text
 photo-signature-studio/
 │
 ├── app.py
 │   └── Main desktop application.
-│       Tkinter UI, clipboard handling, file selection,
-│       PDF rendering, photo processing, signature processing,
-│       preview, resizing and output generation.
+│
+├── core/
+│   ├── __init__.py
+│   ├── database.py
+│   │   └── Local SQLite schema for records, documents, OCR and assets.
+│   └── records.py
+│       └── Record-linked local file/folder management.
+│
+├── ocr/
+│   ├── __init__.py
+│   └── interface.py
+│       └── Provider-neutral OCR interface; Chandra OCR will plug in here.
+│
+├── automation/
+│   └── __init__.py
+│       └── Boundary for future browser/web portal automation.
 │
 ├── requirements.txt
-│   └── Python packages required to run the application.
+│   └── Python packages required to run/build the application.
 │
 ├── build_windows.bat
-│   └── Local Windows build script. Creates the standalone EXE
-│       using PyInstaller. It is for developers/building only;
-│       end users do not need to run this file.
+│   └── Local Windows build script. Creates the standalone EXE.
 │
 ├── README.md
-│   └── Project documentation, setup instructions and architecture.
+│   └── Project documentation, architecture and setup instructions.
 │
 ├── .gitignore
-│   └── Prevents Python caches, virtual environments and build
-│       output from being committed.
 │
 └── .github/
     └── workflows/
         └── windows-build.yml
-            └── GitHub Actions workflow that installs dependencies,
-                builds the Windows EXE and uploads it as an artifact.
+            └── GitHub Actions Windows build and artifact upload.
 ```
 
-### Generated directories
-
-These are **not source files** and should not normally be committed:
-
-```text
-.venv/        Python virtual environment
-__pycache__/  Python bytecode cache
-build/        PyInstaller temporary build files
-dist/         Final Windows executable
-```
-
-## 4. Requirements
+## 9. Requirements
 
 ### For running from source
 
 - Windows 10/11 recommended
 - Python 3.11 or 3.12 recommended
 - Internet is required only to install Python packages initially
-- After dependencies are installed, image processing itself can run offline
+- After dependencies are installed, image processing can run offline
 
 ### Python dependencies
-
-The project uses:
 
 - **Pillow** — image loading, manipulation, clipboard support and output
 - **OpenCV** — face/ink detection and image processing
@@ -151,64 +321,22 @@ The project uses:
 
 Exact package versions are maintained in `requirements.txt`.
 
-## 5. Run from source on Windows
-
-Open **Command Prompt** in the project directory.
-
-### Create virtual environment
+## 10. Run from source on Windows
 
 ```bat
 python -m venv .venv
-```
-
-### Activate it
-
-```bat
 .venv\Scripts\activate
-```
-
-### Install dependencies
-
-```bat
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
-```
-
-### Start the application
-
-```bat
 python app.py
 ```
 
-The desktop window should open.
+## 11. Build the standalone Windows EXE
 
-## 6. Build the standalone Windows EXE
-
-The easiest developer build method is:
+Developer build:
 
 ```bat
 build_windows.bat
-```
-
-The script installs the required packages and runs PyInstaller.
-
-The resulting file is:
-
-```text
-dist\PhotoSignatureStudio.exe
-```
-
-The application is built as a windowed standalone executable, so the end user does not need Python or a Python terminal.
-
-> **Note:** The `.bat` file is a build tool, not the application. If you only want to use Photo & Signature Studio, run `PhotoSignatureStudio.exe`.
-
-## 7. Build manually
-
-If you prefer to run the commands yourself:
-
-```bat
-python -m pip install -r requirements.txt
-python -m PyInstaller --noconfirm --clean --onefile --windowed --name PhotoSignatureStudio app.py
 ```
 
 Output:
@@ -217,238 +345,68 @@ Output:
 dist\PhotoSignatureStudio.exe
 ```
 
-## 8. GitHub Actions Windows build and downloadable EXE
+> The `.bat` file is a build tool, not the application. End users should run `PhotoSignatureStudio.exe`.
 
-The repository contains:
+## 12. GitHub Actions Windows build and downloadable EXE
 
-```text
-.github/workflows/windows-build.yml
-```
+The workflow in `.github/workflows/windows-build.yml` installs Python 3.12, installs dependencies, runs PyInstaller, and uploads the executable as an artifact.
 
-The workflow:
-
-1. Checks out the repository
-2. Installs Python 3.12
-3. Installs `requirements.txt`
-4. Runs PyInstaller
-5. Creates `PhotoSignatureStudio.exe`
-6. Uploads the EXE as a GitHub Actions artifact
-
-A push to `main` triggers the workflow. It can also be started manually from the GitHub Actions tab using **Run workflow**.
-
-### Current build artifact
-
-The latest successful Windows build produces the artifact:
+Artifact:
 
 ```text
 PhotoSignatureStudio-Windows
 └── PhotoSignatureStudio.exe
 ```
 
-The EXE can be obtained from the **Artifacts** section of the corresponding successful GitHub Actions run. The downloaded artifact is a ZIP containing the standalone `PhotoSignatureStudio.exe`.
+A push to `main` triggers the build. It can also be started manually from the GitHub Actions tab.
 
-For the current repository, see the GitHub Actions page:
+The EXE is distributed as a build artifact rather than committed directly to the source repository.
 
-https://github.com/zzpsah/photo-signature-studio/actions
+## 13. Basic usage
 
-> The EXE is intentionally distributed as a build artifact rather than committed directly to the source repository.
+### Paste a photo or screenshot
 
-## 9. Basic usage
-
-### A. Paste a photo
-
-1. Copy an image from a browser, PDF viewer, image editor, scanner application, etc.
+1. Copy an image, screenshot, or supported clipboard content.
 2. Open Photo & Signature Studio.
 3. Press **Ctrl+V**.
-4. Select **Photo** mode.
+4. Select Photo or Signature mode.
 5. Choose a preset or enter Custom dimensions.
 6. Set the maximum KB value if required.
-7. Process/export the result.
+7. Process and save.
 
-### B. Open an image
+### Open an image
 
-1. Click the image/file open control.
-2. Select JPG, PNG, WebP, BMP or TIFF.
-3. Select Photo or Signature mode.
-4. Configure dimensions and KB.
-5. Process and save.
+1. Open a JPG, PNG, WebP, BMP or TIFF.
+2. Select Photo or Signature mode.
+3. Configure dimensions and KB.
+4. Process and save.
 
-### C. Process a PDF
+### Process a PDF
 
 1. Open the PDF.
-2. Select the required PDF page.
-3. The selected page is rendered locally as an image.
-4. Select Photo or Signature mode.
-5. Process and export.
+2. Select the required page.
+3. Select Photo or Signature mode.
+4. Process and export.
 
-### D. Signature
+## 14. Output-size optimization
 
-1. Scan or copy the signature image.
-2. Paste with `Ctrl+V` or open the image/PDF.
-3. Select Signature mode.
-4. Set exact width and height.
-5. Set maximum KB if required.
-6. Process and inspect the result.
+When a maximum KB value is specified, the application attempts to reduce JPEG quality until the result is at or below the requested limit.
 
-## 10. Presets and Custom mode
+PNG is not suitable for every KB-constrained photograph because PNG is lossless and may produce a larger file than JPEG.
 
-Presets are convenience configurations, **not authoritative specifications**.
+## 15. Privacy and security
 
-For a form that says, for example:
+Normal processing is local and does not require an application server.
 
-```text
-Photo: 200 × 230 pixels
-Maximum size: 50 KB
-Format: JPG
-```
+Future OCR and automation modules should preserve the same privacy-first approach wherever technically practical. Sensitive documents should not be placed in public GitHub issues, commits, screenshots, or test fixtures.
 
-enter:
-
-```text
-Width:  200
-Height: 230
-Max KB: 50
-Format: JPG
-```
-
-For a signature requirement:
-
-```text
-Width:  140
-Height: 60
-Max KB: 20
-Format: JPG/PNG
-```
-
-Use the exact values stated by the target portal.
-
-## 11. Output-size optimization
-
-When a maximum KB value is specified, the application attempts to reduce JPEG quality until the resulting file is at or below the requested limit.
-
-Very small KB limits can noticeably reduce image quality. If the destination portal allows a larger file, prefer the larger limit.
-
-PNG is not suitable for every KB-constrained photograph because PNG compression is lossless and may produce a larger file than JPEG.
-
-## 12. Privacy and security
-
-The intended processing model is local:
-
-```text
-Your computer
-    |
-    +-- Photo
-    +-- Signature
-    +-- PDF
-    |
-    v
-Photo & Signature Studio
-    |
-    v
-Output file
-```
-
-There is no application server required for normal processing.
-
-Do not place sensitive identity documents in public GitHub issues, commits, screenshots, or test fixtures.
-
-## 13. Development architecture
-
-The current implementation intentionally keeps the architecture simple so it can be packaged reliably for Windows:
-
-```text
-Tkinter UI
-   |
-   +-- Clipboard / file input
-   |
-   +-- PDF rendering (PyMuPDF)
-   |
-   +-- Image processing (Pillow + OpenCV + NumPy)
-   |
-   +-- Photo pipeline
-   |
-   +-- Signature pipeline
-   |
-   +-- Resize / compression
-   |
-   +-- Preview / export
-   |
-   +-- PyInstaller packaging
-```
-
-## 14. Planned enhancements / roadmap
-
-The current repository is the foundation for a fuller production application. Planned and potential next modules include:
-
-### OCR and document intelligence
-
-- **Chandra OCR integration** for future OCR/document-understanding capabilities
-- OCR-assisted detection of text regions in scanned documents
-- Automatic document/page classification
-- Detection of application-form fields and relevant image/signature areas
-- OCR-assisted extraction of dimensions, file-size instructions, labels, and other portal requirements where technically feasible
-- Human-verifiable OCR results rather than silently applying uncertain extracted requirements
-
-> **Chandra OCR is a planned future enhancement and is not part of the current MVP.** The integration should be designed as an optional local processing component where practical, while preserving the application's privacy-first/offline architecture.
-
-### Image processing and UX
-
-- Modern Windows UI
-- Drag-and-drop support
-- Better AI/ML portrait segmentation and background removal
-- More accurate passport composition and head-position rules
-- Manual crop editor with draggable guides
-- Automatic photo/signature classification
-- Batch processing
-- A4 and 4×6 print-sheet generation
-- Photo + signature application kits
-- Multiple configurable portal presets
-- Hindi/English interface
-- EXIF orientation handling
-- Undo/redo
-- Side-by-side original/result comparison
-
-### Packaging and quality
-
-- Installation package (`Setup.exe`)
-- Versioned GitHub releases
-- Automatic release builds
-- Automated unit and image-processing tests
-- Regression test images for photo, signature, and PDF workflows
-- Better memory handling for very large images/PDFs
-- Background processing with progress and cancellation so the UI remains responsive
-
-## 15. Troubleshooting
-
-### `python` is not recognized
-
-Install Python and ensure **Add Python to PATH** is enabled, then reopen Command Prompt.
-
-### Tkinter error
-
-Use the standard Windows Python installer. Tkinter is included with the normal CPython Windows distribution.
-
-### PDF does not open
-
-Reinstall dependencies:
-
-```bat
-python -m pip install -r requirements.txt --upgrade
-```
-
-### OpenCV cannot find the face
-
-Face detection is dependent on image quality, lighting, angle and face size. Use the manual/custom crop workflow and verify the output visually.
-
-### Signature has unwanted background
-
-Use a clean, high-resolution scan with strong contrast between ink and paper. The automatic signature cleanup is intentionally conservative and should be inspected before submission.
+## 16. Troubleshooting
 
 ### `.bat` build appears to hang
 
-Run the batch file from **Command Prompt** rather than double-clicking it so that installation/build messages remain visible. The first build can take time because large dependencies such as OpenCV, NumPy, PyMuPDF and PyInstaller may need to be installed. If the process remains stuck, capture the last displayed command/output and investigate that specific step.
+Run it from **Command Prompt** so installation/build output remains visible. The first build may take time because OpenCV, NumPy, PyMuPDF and PyInstaller are large dependencies. If it remains stuck, capture the last displayed command/output.
 
-### EXE is missing after local build
+### EXE is missing
 
 Check:
 
@@ -456,16 +414,23 @@ Check:
 dist\PhotoSignatureStudio.exe
 ```
 
-If it is not present, run the build from Command Prompt rather than double-clicking the batch file so that errors remain visible.
+### OpenCV cannot find the face
 
-## 16. Project status
+Detection depends on image quality, lighting, angle and face size. Verify the result manually.
+
+### Signature has unwanted background
+
+Use a clean, high-resolution scan with strong ink/paper contrast and inspect the result before submission.
+
+## 17. Project status and roadmap
 
 **Current:** Functional offline MVP / foundation
 
 ### Implemented now
 
 - Windows desktop GUI
-- Clipboard image/file input
+- Clipboard image and screenshot paste with Ctrl+V
+- Clipboard file-path support where available
 - JPG/JPEG/PNG/WebP/BMP/TIFF input
 - Local PDF page rendering
 - Photo processing with OpenCV face detection
@@ -476,18 +441,56 @@ If it is not present, run the build from Command Prompt rather than double-click
 - Preview and export
 - Standalone Windows EXE build
 - GitHub Actions Windows build artifact
+- Initial SQLite/record-management architecture
+- Provider-neutral OCR interface
+- Future automation boundary
+
+### Next development phases
+
+**Phase 1 — Document intelligence**
+- Chandra OCR integration
+- Structured data extraction
+- Record-management UI
+- Automatic document/page classification
+- Photo/signature region detection
+- Source-to-asset linking
+
+**Phase 2 — Productivity**
+- Search and filtering
+- Batch processing
+- Portal presets
+- Application kits
+- Export/backup packages
+- Hindi/English interface
+- Duplicate detection
+
+**Phase 3 — Advanced image/document processing**
+- AI portrait segmentation/background removal
+- Better passport composition rules
+- Manual crop editor
+- Large-file memory controls
+- Background processing, progress and cancellation
+
+**Phase 4 — Web automation**
+- Browser automation framework
+- Portal-specific adapters
+- Field mapping from records to portal forms
+- Photo/signature/document uploads
+- Pre-submission validation
+- Human review/confirmation
+- Automation logs
 
 ### Not yet implemented
 
-- Chandra OCR
+- Chandra OCR engine integration
+- Full record-management UI
+- Automatic data extraction
+- Automatic photo/signature detection from documents
+- Browser/web automation
 - AI background removal/segmentation
 - Drag-and-drop
 - Batch processing
-- Automatic portal-requirement extraction
-- Modern UI redesign
 - Installer package
-
-The repository is structured so the processing engine can be improved independently from the desktop UI and packaging system.
 
 ## License
 
