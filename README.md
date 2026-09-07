@@ -102,7 +102,8 @@ photo-signature-studio/
 │
 ├── build_windows.bat
 │   └── Local Windows build script. Creates the standalone EXE
-│       using PyInstaller.
+│       using PyInstaller. It is for developers/building only;
+│       end users do not need to run this file.
 │
 ├── README.md
 │   └── Project documentation, setup instructions and architecture.
@@ -123,10 +124,10 @@ photo-signature-studio/
 These are **not source files** and should not normally be committed:
 
 ```text
-.venv/       Python virtual environment
-__pycache__/ Python bytecode cache
-build/       PyInstaller temporary build files
- dist/       Final Windows executable
+.venv/        Python virtual environment
+__pycache__/  Python bytecode cache
+build/        PyInstaller temporary build files
+dist/         Final Windows executable
 ```
 
 ## 4. Requirements
@@ -183,7 +184,7 @@ The desktop window should open.
 
 ## 6. Build the standalone Windows EXE
 
-The easiest method is:
+The easiest developer build method is:
 
 ```bat
 build_windows.bat
@@ -197,7 +198,9 @@ The resulting file is:
 dist\PhotoSignatureStudio.exe
 ```
 
-The application is built as a windowed standalone executable, so the end user does not need to open a Python terminal.
+The application is built as a windowed standalone executable, so the end user does not need Python or a Python terminal.
+
+> **Note:** The `.bat` file is a build tool, not the application. If you only want to use Photo & Signature Studio, run `PhotoSignatureStudio.exe`.
 
 ## 7. Build manually
 
@@ -214,7 +217,7 @@ Output:
 dist\PhotoSignatureStudio.exe
 ```
 
-## 8. GitHub Actions Windows build
+## 8. GitHub Actions Windows build and downloadable EXE
 
 The repository contains:
 
@@ -231,21 +234,24 @@ The workflow:
 5. Creates `PhotoSignatureStudio.exe`
 6. Uploads the EXE as a GitHub Actions artifact
 
-### Running the build
-
 A push to `main` triggers the workflow. It can also be started manually from the GitHub Actions tab using **Run workflow**.
 
-The artifact is named:
+### Current build artifact
+
+The latest successful Windows build produces the artifact:
 
 ```text
 PhotoSignatureStudio-Windows
+└── PhotoSignatureStudio.exe
 ```
 
-Inside the artifact:
+The EXE can be obtained from the **Artifacts** section of the corresponding successful GitHub Actions run. The downloaded artifact is a ZIP containing the standalone `PhotoSignatureStudio.exe`.
 
-```text
-PhotoSignatureStudio.exe
-```
+For the current repository, see the GitHub Actions page:
+
+https://github.com/zzpsah/photo-signature-studio/actions
+
+> The EXE is intentionally distributed as a build artifact rather than committed directly to the source repository.
 
 ## 9. Basic usage
 
@@ -370,9 +376,22 @@ Tkinter UI
    +-- PyInstaller packaging
 ```
 
-## 14. Planned enhancements
+## 14. Planned enhancements / roadmap
 
-The current repository is the foundation for a fuller production application. Potential next modules include:
+The current repository is the foundation for a fuller production application. Planned and potential next modules include:
+
+### OCR and document intelligence
+
+- **Chandra OCR integration** for future OCR/document-understanding capabilities
+- OCR-assisted detection of text regions in scanned documents
+- Automatic document/page classification
+- Detection of application-form fields and relevant image/signature areas
+- OCR-assisted extraction of dimensions, file-size instructions, labels, and other portal requirements where technically feasible
+- Human-verifiable OCR results rather than silently applying uncertain extracted requirements
+
+> **Chandra OCR is a planned future enhancement and is not part of the current MVP.** The integration should be designed as an optional local processing component where practical, while preserving the application's privacy-first/offline architecture.
+
+### Image processing and UX
 
 - Modern Windows UI
 - Drag-and-drop support
@@ -388,9 +407,16 @@ The current repository is the foundation for a fuller production application. Po
 - EXIF orientation handling
 - Undo/redo
 - Side-by-side original/result comparison
+
+### Packaging and quality
+
 - Installation package (`Setup.exe`)
-- Versioned releases
+- Versioned GitHub releases
+- Automatic release builds
 - Automated unit and image-processing tests
+- Regression test images for photo, signature, and PDF workflows
+- Better memory handling for very large images/PDFs
+- Background processing with progress and cancellation so the UI remains responsive
 
 ## 15. Troubleshooting
 
@@ -418,7 +444,11 @@ Face detection is dependent on image quality, lighting, angle and face size. Use
 
 Use a clean, high-resolution scan with strong contrast between ink and paper. The automatic signature cleanup is intentionally conservative and should be inspected before submission.
 
-### EXE is missing after build
+### `.bat` build appears to hang
+
+Run the batch file from **Command Prompt** rather than double-clicking it so that installation/build messages remain visible. The first build can take time because large dependencies such as OpenCV, NumPy, PyMuPDF and PyInstaller may need to be installed. If the process remains stuck, capture the last displayed command/output and investigate that specific step.
+
+### EXE is missing after local build
 
 Check:
 
@@ -431,6 +461,31 @@ If it is not present, run the build from Command Prompt rather than double-click
 ## 16. Project status
 
 **Current:** Functional offline MVP / foundation
+
+### Implemented now
+
+- Windows desktop GUI
+- Clipboard image/file input
+- JPG/JPEG/PNG/WebP/BMP/TIFF input
+- Local PDF page rendering
+- Photo processing with OpenCV face detection
+- Signature cleanup
+- Exact pixel dimensions
+- JPEG KB-target optimization
+- PNG output
+- Preview and export
+- Standalone Windows EXE build
+- GitHub Actions Windows build artifact
+
+### Not yet implemented
+
+- Chandra OCR
+- AI background removal/segmentation
+- Drag-and-drop
+- Batch processing
+- Automatic portal-requirement extraction
+- Modern UI redesign
+- Installer package
 
 The repository is structured so the processing engine can be improved independently from the desktop UI and packaging system.
 
