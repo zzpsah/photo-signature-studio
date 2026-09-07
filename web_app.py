@@ -40,6 +40,16 @@ def encode_jpeg_under_kb(image: Image.Image, max_kb: int) -> bytes:
     return bio.getvalue()
 
 
+def render_pdf_page(payload: bytes, page_index: int) -> Image.Image:
+    document = fitz.open(stream=payload, filetype="pdf")
+    try:
+        page = document.load_page(page_index)
+        pix = page.get_pixmap(matrix=fitz.Matrix(2.2, 2.2), alpha=False)
+        return Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+    finally:
+        document.close()
+
+
 def detect_face_box(image: Image.Image):
     gray = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2GRAY)
     cascade = cv2.CascadeClassifier(os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_default.xml"))
@@ -122,25 +132,13 @@ def run_chandra_ocr(file_name: str, payload: bytes, api_key: str) -> dict:
     raise TimeoutError("Chandra OCR did not finish within 3 minutes")
 
 
-def render_pdf_page(payload: bytes, page_index: int) -> Image.Image:
-    document = fitz.open(stream=payload, filetype="pdf")
-    try:
-        page = document.load_page(page_index)
-        pix = page.get_pixmap(matrix=fitz.Matrix(2.2, 2.2), alpha=False)
-        return Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-    finally:
-        document.close()
-
-
 def form_editor(original: Image.Image, editor_key: str) -> tuple[bytes, str]:
     if st.session_state.get("form_editor_key") != editor_key:
         st.session_state.form_editor_key = editor_key
         st.session_state.form_editor_settings = FormEditSettings()
-
     settings: FormEditSettings = st.session_state.form_editor_settings
     st.markdown("#### 🛠 Document editor — prepare before OCR")
-    st.caption("This mode is designed for photographed/scanned forms: rotate, straighten, detect the paper boundary, remove borders, and clean uneven lighting before OCR. The uploaded original is never changed.")
-
+    st.caption("Designed for photographed/scanned forms: rotate, straighten, detect the paper boundary, remove borders, and clean uneven lighting. The uploaded original is never changed.")
     c1, c2, c3, c4, c5 = st.columns(5)
     if c1.button("↶ Left", use_container_width=True, key=f"left_{editor_key}"):
         settings.quarter_turns -= 1
@@ -160,10 +158,8 @@ def form_editor(original: Image.Image, editor_key: str) -> tuple[bytes, str]:
     if c5.button("↺ Reset", use_container_width=True, key=f"reset_{editor_key}"):
         st.session_state.form_editor_settings = FormEditSettings()
         st.rerun()
-
     st.write(f"**Current correction:** quarter turns {settings.quarter_turns % 4}, deskew {settings.deskew_angle:+.2f}°, fine rotation {settings.fine_angle:+.1f}°")
     settings.fine_angle = st.slider("Fine rotation / straighten", -15.0, 15.0, float(settings.fine_angle), 0.1, key=f"fine_{editor_key}")
-
     st.markdown("**Crop unwanted paper/background**")
     a, b = st.columns(2)
     settings.crop_left = a.slider("Left edge", 0, 40, int(settings.crop_left), key=f"crop_l_{editor_key}")
@@ -174,7 +170,6 @@ def form_editor(original: Image.Image, editor_key: str) -> tuple[bytes, str]:
     if settings.crop_right <= settings.crop_left or settings.crop_bottom <= settings.crop_top:
         st.error("Crop edges must leave a positive page area.")
         settings.crop_left, settings.crop_top, settings.crop_right, settings.crop_bottom = 0, 0, 100, 100
-
     a, b, c = st.columns(3)
     settings.brightness = a.slider("Brightness", 0.6, 1.6, float(settings.brightness), 0.05, key=f"bright_{editor_key}")
     settings.contrast = b.slider("Contrast", 0.6, 1.8, float(settings.contrast), 0.05, key=f"contrast_{editor_key}")
@@ -182,7 +177,6 @@ def form_editor(original: Image.Image, editor_key: str) -> tuple[bytes, str]:
     a, b = st.columns(2)
     settings.grayscale = a.checkbox("Grayscale", bool(settings.grayscale), key=f"gray_{editor_key}")
     settings.cleanup = b.checkbox("Uneven-lighting / scan cleanup", bool(settings.cleanup), key=f"clean_{editor_key}")
-
     preview = apply_settings(original, settings)
     st.image(preview, caption=f"Prepared OCR preview — {preview.width} × {preview.height}px", width="stretch")
     prepared = prepare_jpeg(preview)
@@ -198,10 +192,10 @@ def main():
     tabs = st.tabs(["📷 Photo", "✍ Signature", "📄 Student Form / OCR", "🔎 Reference Match"])
 
     with tabs[0]:
-        st.subheader("Batch photo processing")
-        preset = st.selectbox("Preset", list(PHOTO_PRESETS))
+        st.subheader("Photo processing")
+        preset = st.selectbox("Preset", list(PHOTO_PRESETS), key="photo_preset")
         width, height, max_kb = PHOTO_PRESETS[preset]
-        face_crop = st.checkbox("Automatic face crop", True)
+        face_crop = st.checkbox("Automatic face crop", True, key="photo_face")
         files = st.file_uploader("Upload one or more student photos", type=["jpg", "jpeg", "png", "webp", "bmp", "tif", "tiff"], accept_multiple_files=True, key="photos")
         if files and st.button("PROCESS PHOTOS", type="primary"):
             outputs, progress = [], st.progress(0)
@@ -215,8 +209,8 @@ def main():
                 st.download_button("⬇ Download all photos (ZIP)", zip_outputs(outputs), "photos_processed.zip", "application/zip")
 
     with tabs[1]:
-        st.subheader("Batch signature processing")
-        preset = st.selectbox("Preset", list(SIGNATURE_PRESETS))
+        st.subheader("Signature processing")
+        preset = st.selectbox("Preset", list(SIGNATURE_PRESETS), key="signature_preset")
         width, height, max_kb = SIGNATURE_PRESETS[preset]
         files = st.file_uploader("Upload one or more signature images", type=["jpg", "jpeg", "png", "webp", "bmp", "tif", "tiff"], accept_multiple_files=True, key="signatures")
         if files and st.button("PROCESS SIGNATURES", type="primary"):
@@ -237,8 +231,7 @@ def main():
         form_file = st.file_uploader("Upload hardcopy scan / phone photo / PDF", type=["pdf", "jpg", "jpeg", "png", "webp"], key="form")
         if form_file:
             raw = form_file.getvalue()
-            is_pdf = form_file.name.lower().endswith(".pdf")
-            if is_pdf:
+            if form_file.name.lower().endswith(".pdf"):
                 document = fitz.open(stream=raw, filetype="pdf")
                 page_count = len(document)
                 document.close()
@@ -293,7 +286,7 @@ def main():
                                 st.download_button("⬇ Download OCR Markdown", markdown, f"{Path(form_file.name).stem}_ocr.md", "text/markdown")
                             except Exception as exc:
                                 st.error(f"OCR failed: {exc}")
-        st.caption("Recommended flow for this type of form: photograph/scan → document correction → Chandra OCR → field-by-field verification → photo/signature processing → BSEB preparation.")
+        st.caption("Recommended flow: scan/photograph → document correction → Chandra OCR → field-by-field verification → photo/signature processing → BSEB preparation.")
 
     with tabs[3]:
         st.subheader("Supabase Class X reference lookup")
