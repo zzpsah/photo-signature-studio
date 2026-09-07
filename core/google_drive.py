@@ -66,6 +66,7 @@ def upload_bytes(filename: str, payload: bytes, mime_type: str = "image/jpeg", f
             body=metadata,
             media_body=media,
             fields="id,name,mimeType,size,webViewLink,webContentLink",
+            supportsAllDrives=True,
         ).execute()
     except Exception as exc:
         raise GoogleDriveError(f"Google Drive upload failed: {exc}") from exc
