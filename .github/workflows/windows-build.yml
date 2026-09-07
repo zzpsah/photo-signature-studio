@@ -3,6 +3,15 @@ name: Windows Build
 on:
   push:
     branches: [main]
+    paths:
+      - 'app.py'
+      - 'main.py'
+      - 'registration_app.py'
+      - 'core/**'
+      - 'ocr/**'
+      - 'requirements.txt'
+      - 'build_windows.bat'
+      - '.github/workflows/windows-build.yml'
   workflow_dispatch:
 
 jobs:
