@@ -1,0 +1,24 @@
+context_version: 1
+specification: portable-project-context
+project_id: photo-signature-studio
+name: Photo Signature Studio
+managed_by: development-os
+canonical_repository: zzpsah/photo-signature-studio
+canonical_url: https://github.com/zzpsah/photo-signature-studio
+context_directory: .ai
+read_first:
+  - STATE-INDEX.md
+  - PROJECT.md
+  - CURRENT-STATE.md
+recommended:
+  - ARCHITECTURE.md
+  - DECISIONS.md
+  - TASKS.md
+  - CHANGELOG.md
+state_index:
+  generated: true
+  authority: repository-evidence-only
+session_records:
+  directory: SESSIONS
+  format: session-template.md
+secrets_policy: never-store-secrets
