@@ -13,5 +13,7 @@ permissions:
 jobs:
   sync:
     uses: zzpsah/chatgpt-development-os/.github/workflows/context-sync.yml@main
+    with:
+      meaningful_path_patterns: '**'
     permissions:
       contents: write
